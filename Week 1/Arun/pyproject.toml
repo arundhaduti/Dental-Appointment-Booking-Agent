@@ -1,0 +1,18 @@
+[project]
+name = "arun"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "pydantic-ai",
+    "pydantic[email]",
+    "huggingface-hub",
+    "nest-asyncio",
+    "python-dotenv",
+    "python-dateutil",
+    "fastapi",
+    "uvicorn[standard]",
+    "npm>=0.1.1",
+    "dateparser"
+]
