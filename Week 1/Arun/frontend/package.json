@@ -5,7 +5,9 @@
   "dependencies": {
     "react": "18.x",
     "react-dom": "18.x",
-    "react-scripts": "latest"
+    "react-markdown": "^10.1.0",
+    "react-scripts": "latest",
+    "remark-gfm": "^4.0.1"
   },
   "scripts": {
     "start": "react-scripts start",

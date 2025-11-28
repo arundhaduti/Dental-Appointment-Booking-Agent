@@ -4,6 +4,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from typing import List, Optional, Dict, Any
 import asyncio
 
+
 # Import your Week1 agent and tools
 from agent import (
     agent,
@@ -28,7 +29,9 @@ class ChatRequest(BaseModel):
     message: str  # ⬅️ ONLY the current user message
 
 # 🔥 Global history, same idea as your CLI `msg_history`
-msg_history: List[Any] = []
+# msg_history: List[Any] = []
+msg_history: List[Any] = msg_history if 'msg_history' in globals() else []  # or just define it once in your file
+
 
 @app.post("/chat")
 async def chat(req: ChatRequest):
@@ -115,6 +118,21 @@ async def check_slot(b: BookingRequest):
 async def get_latest_appointment():
     """Return the last booked appointment details (in-memory). Useful for demo/testing."""
     return {"appointmentDetails": appointmentDetails}
+
+@app.post("/reset")
+async def reset_chat():
+    """
+    Reset server-side conversation state so the next web chat
+    behaves like a fresh CLI session.
+    """
+    global msg_history, appointmentDetails
+    msg_history = []
+    try:
+      appointmentDetails.clear()
+    except Exception:
+      appointmentDetails = {}
+    return {"status": "ok"}
+
 
 if __name__ == "__main__":
     import uvicorn
