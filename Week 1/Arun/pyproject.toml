@@ -14,5 +14,8 @@ dependencies = [
     "fastapi",
     "uvicorn[standard]",
     "npm>=0.1.1",
-    "dateparser"
+    "dateparser",
+    "google-auth-oauthlib>=1.2.3",
+    "google-auth-httplib2>=0.2.1",
+    "google-api-python-client>=2.187.0",
 ]
