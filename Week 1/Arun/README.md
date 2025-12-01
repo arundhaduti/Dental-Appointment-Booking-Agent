@@ -48,165 +48,258 @@ npm start
 Note: You may need to run "npm install" the first time before running "npm start". Also run "npm install react-markdown remark-gfm" before npm start so that the markdown dependencies are installed. All these commands need to be run at "cd frontend"
 
 
+# 🦷 Dental Appointment Booking Assistant  
+### React • FastAPI • PydanticAI • Google Calendar • Pinecone • Rate Limiting  
 
-# 🦷 Dental Appointment Booking Assistant
-### React • FastAPI • PydanticAI • Google Calendar • Pinecone • Rate Limiting
-
-A conversational AI assistant that books dental appointments using:
-- A React chat UI  
-- A FastAPI backend  
-- An LLM (PydanticAI + OpenRouter)  
-- Google Calendar for real scheduling  
-- Pinecone for storing appointments  
-- Simple API rate limiting  
-
-Week 3 adds real persistence, calendar automation, and protection against abuse.
+A fully conversational AI-powered dental appointment booking assistant.  
+Users interact naturally through a chat-based UI, and the backend handles intelligent reasoning, real-time availability checks, Google Calendar scheduling, persistence, and rate limiting.
 
 ---
 
-## 🚀 Features
+# 📘 Overview
 
-### 🔹 Conversational AI Booking
-Users chat naturally:
-> “I want to book an appointment.”
+This project provides an end‑to‑end system for managing dental appointments through natural language:
 
-The assistant collects:
-- Name  
-- Email  
-- Phone  
-- Date  
-- Time  
-- Reason  
+- A modern **React chat interface**
+- A **FastAPI backend** powered by **PydanticAI**
+- Automatic **Google Calendar scheduling**
+- **Pinecone** as a persistence layer for appointments
+- **Rate limiting** for API protection
 
-Then automatically books the appointment.
+The user interacts only with the AI assistant — no forms, no buttons.
 
 ---
 
-### 🔹 Google Calendar Integration
+# 🚀 Features
+
+## 🧠 Conversational AI Booking
+The assistant:
+- Asks one question at a time  
+- Validates date, time, phone, and email  
+- Detects missing or invalid fields  
+- Prevents ambiguous instructions  
+- Confirms before scheduling  
+
+Once all details are gathered, the assistant calls backend tools automatically.
+
+---
+
+## 📅 Google Calendar Integration
+The backend:
 - Checks dentist availability  
-- Prevents double booking  
-- Creates real calendar events  
-- Uses OAuth2 (`credentials.json` + `token.json`)
+- Prevents overlapping bookings  
+- Creates real Google Calendar events  
+- Stores the `google_event_id` for future management  
+
+Uses OAuth2 with:
+- `credentials.json` (OAuth client secrets)  
+- `token.json` (auto-generated at first authorization)
 
 ---
 
-### 🔹 Pinecone Persistence
+## 🗄 Pinecone Persistence
 Stores:
 - User profiles  
-- Appointment history  
-- Google event IDs  
+- Appointment records  
+- Metadata (event IDs, start/end time, reason, etc.)
 
-Query:
-
+Appointments can be queried with:
+```
 GET /appointments?user_id=<email>
-
+```
 
 ---
 
-### 🔹 Rate Limiting
-Each IP is limited to:
+## 🔒 Rate Limiting
+To protect the backend, each IP can make:
 - **10 requests per minute**
-- Returns **HTTP 429** when exceeded
 
-Applied to:
-- `/chat`
-- `/appointments`
-- `/book`
-- `/check_slot`
+A limit breach returns:
+```
+HTTP 429 Too Many Requests
+```
+
+This applies to all main API endpoints.
 
 ---
 
-## 🗂 Project Structure
+# 🏗 Architecture
 
+```
+User → React Chat UI → FastAPI → PydanticAI Agent → Tools:
+    • Google Calendar (availability + event creation)
+    • Pinecone (save/read appointments)
+```
 
+The LLM orchestrates the entire workflow.
 
+---
+
+# 🗂 Project Structure
+
+```
 backend/
-main.py
-app/
-llm/agent.py
-google_calendar.py
-persistence.py
-models.py
-rate_limit.py
-pinecone_client.py
+  main.py
+  app/
+    llm/
+      agent.py
+    google_calendar.py
+    persistence.py
+    models.py
+    rate_limit.py
+    pinecone_client.py
 
 frontend/
-src/App.jsx
-
+  src/App.jsx
+```
 
 ---
 
-## ⚙️ Setup
+# ⚙ Backend Setup (Using uv)
 
-### 1. Backend
-```bash
-cd backend
-pip install -r requirements.txt
+## 1. Install dependencies
+From `backend/`:
 
-2. Environment Variables
+```
+uv sync
+```
 
-Create backend/.env:
+To add new dependencies:
 
+```
+uv add fastapi uvicorn pydantic-ai python-dotenv google-auth google-auth-oauthlib google-api-python-client pinecone-client python-dateutil
+```
+
+---
+
+# 🔧 Environment Variables
+
+Create `backend/.env`:
+
+```
 OPENROUTER_API_KEY=sk-xxxx
 PINECONE_API_KEY=xxxx
 PINECONE_INDEX_NAME=dental-appointments
 GOOGLE_CALENDAR_ID=primary
+```
 
-3. Google Calendar Files
+---
 
-Place inside backend/:
+# 🔐 Google Calendar Setup
 
-credentials.json
+1. Go to **Google Cloud Console → APIs & Services → Credentials**
+2. Create an **OAuth Client ID**
+3. Download **credentials.json**
+4. Place it inside `backend/`
+5. When the backend first needs calendar access, your browser will open for OAuth
+6. A **token.json** file will be generated automatically
 
-token.json (auto-created after first OAuth run)
+Requires enabling:
+- Google Calendar API
 
-4. Pinecone
+---
 
-Create index:
+# 📦 Pinecone Setup
 
-Name: dental-appointments
+1. Create a serverless index:
+   - Name: `dental-appointments`
+   - Dimension: 64
+   - Metric: cosine  
+2. Confirm `PINECONE_API_KEY` is valid  
 
-Dimension: 64
+Backend loads the index in `pinecone_client.py`.
 
-Metric: cosine
+---
 
-5. Run Backend
-uvicorn main:app --reload
+# 🚀 Running the Backend
 
+```
+uv run uvicorn main:app --reload
+```
 
-Docs:
+Open API docs:
 
+```
 http://localhost:8000/docs
+```
 
-⚙️ Frontend
+---
+
+# 💻 Frontend Setup
+
+```
 cd frontend
 npm install
 npm start
+```
 
-
-Visit:
-
+Open:
+```
 http://localhost:3000
+```
 
-🧪 Tests
-✔ Booking Flow
+---
 
-Open UI
+# 🧪 Testing Guide
 
-Type “I want to book an appointment”
+## ✔ Full Booking Flow
+1. Open UI  
+2. Type:  
+   ```
+   I want to book an appointment
+   ```  
+3. Provide all details as the assistant asks  
+4. A Google Calendar event is created  
+5. Appointment appears in Pinecone:
+   ```
+   GET /appointments?user_id=<email>
+   ```
 
-Provide details
+---
 
-Check Google Calendar
+## ✔ Slot Conflict Handling
+Try to book the same slot again.  
+Expected response:
+```
+That time slot is already booked.
+```
 
-Verify Pinecone:
+---
 
-GET /appointments?user_id=<email>
+## ✔ Rate Limiting
+Send >10 requests within 60 seconds.  
+Response:
+```
+HTTP 429 Too Many Requests
+```
 
-✔ Slot Conflict
+---
 
-Book same date/time again → Assistant denies.
+# 🧰 API Summary
 
-✔ Rate Limiting
+### POST /chat
+```
+{ "message": "Hello" }
+```
 
-Send >10 requests in 60s → HTTP 429.
+### POST /appointments  
+### GET /appointments?user_id=<email>  
+### POST /book  
+### POST /check_slot  
+### POST /reset  
+
+---
+
+# 🧯 Troubleshooting
+
+### Google OAuth “App Not Verified”
+Add your email to OAuth test users  
+or publish the OAuth app publicly.
+
+### Pinecone vector errors
+Ensure vectors are non‑zero and match index dimensions.
+
+### Chat endpoint hangs
+Use synchronous `agent.run_sync()` instead of thread wrappers.
+
+---
