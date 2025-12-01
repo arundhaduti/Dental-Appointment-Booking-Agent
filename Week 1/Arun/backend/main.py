@@ -4,6 +4,7 @@ from fastapi import FastAPI, Depends, HTTPException, status
 from pydantic import BaseModel
 from fastapi.middleware.cors import CORSMiddleware
 from typing import List, Optional, Dict, Any
+from app.rate_limit import rate_limiter
 import asyncio
 import uuid
 
@@ -43,7 +44,7 @@ class ChatRequest(BaseModel):
 msg_history: List[Any] = []
 
 
-@app.post("/chat")
+@app.post("/chat", dependencies=[Depends(rate_limiter)])
 def chat(req: ChatRequest):
     """
     Simple, synchronous chat endpoint.
