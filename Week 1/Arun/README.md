@@ -46,3 +46,44 @@ activate .venv and then cd to frontend and run the below command
 npm start
 
 Note: You may need to run "npm install" the first time before running "npm start". Also run "npm install react-markdown remark-gfm" before npm start so that the markdown dependencies are installed. All these commands need to be run at "cd frontend"
+
+
+
+🦷 Dental Appointment Booking Assistant
+React + FastAPI + LLM (PydanticAI) + Google Calendar + Pinecone + Rate Limiting
+Week 3 – Persistence, Scheduling, and API Protection
+
+This project builds a fully conversational dental appointment booking assistant using:
+
+React web chat interface
+
+FastAPI backend
+
+LLM-driven reasoning (via PydanticAI & OpenRouter)
+
+Google Calendar API (real appointment creation)
+
+Pinecone vector DB (user + appointment persistence)
+
+API Rate Limiting (abuse protection)
+
+Week 3 upgrades the system from a simple Week-1 in-memory chatbot into a real scheduling system that prevents double-booking, stores historical appointments, and persists users across sessions.
+
+🌟 Week 3 Features Implemented
+✅ 1. Google Calendar Integration
+
+Your assistant now:
+
+Checks availability using the Google Calendar API
+
+Prevents double-booking
+
+Creates real calendar events when a booking is confirmed
+
+Uses OAuth2 (credentials.json → token.json)
+
+This makes your bot a real-world appointment scheduler, not just a demo.
+
+✅ 2. Pinecone Persistence Layer
+
+All appointment data is now stored in Pinecone using metadata records.
