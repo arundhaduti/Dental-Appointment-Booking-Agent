@@ -2,11 +2,15 @@
 
 from __future__ import annotations
 
-from datetime import datetime
-from typing import List
+from datetime import datetime, timedelta, timezone
+from typing import List, Optional
 
 from .pinecone_client import index  # assumes you already have this
 from .models import UserProfile, StoredAppointment
+
+
+
+IST = timezone(timedelta(hours=5, minutes=30))
 
 # Keep this consistent with your index dimension
 DUMMY_VECTOR_DIM = 64
@@ -120,3 +124,21 @@ def get_appointments_for_user(user_id: str, limit: int = 50) -> List[StoredAppoi
     appointments.sort(key=lambda a: a.start_time)
 
     return appointments
+
+def get_latest_confirmed_future_appointment(user_id: str, limit: int = 50) -> Optional[StoredAppointment]:
+    """
+    Return the nearest upcoming confirmed appointment for this user, if any.
+    This is what we'll reschedule instead of creating a new one.
+    """
+    # Reuse your existing getter if you have it:
+    appointments: List[StoredAppointment] = get_appointments_for_user(user_id, limit=limit)
+
+    now = datetime.now(IST)
+    future = [
+        a for a in appointments
+        if a.status == "confirmed" and a.start_time >= now  # adjust field names if needed
+    ]
+    # sort by start time so [0] is the soonest upcoming
+    future.sort(key=lambda a: a.start_time)
+
+    return future[0] if future else None

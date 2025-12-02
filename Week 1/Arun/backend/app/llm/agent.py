@@ -15,6 +15,20 @@ from typing import Any, Dict
 from app.models import StoredAppointment, UserProfile
 from app.persistence import save_stored_appointment, save_user
 from app.google_calendar import is_slot_free, create_calendar_event
+from typing import Any, Dict
+
+from app.persistence import (
+    save_stored_appointment,
+    save_user,
+    get_latest_confirmed_future_appointment,
+)
+from app.google_calendar import (
+    is_slot_free,
+    create_calendar_event,
+    update_calendar_event,
+)
+from app.models import StoredAppointment, UserProfile
+
 
 # ---------------------------------------------------------
 #  Timezone setup
@@ -88,6 +102,38 @@ class Appointment(BaseModel):
         return v
 
 
+class RescheduleRequest(BaseModel):
+    """
+    Data needed to reschedule an existing appointment for a user.
+    The LLM should collect the new date & time and the email (user id).
+    """
+    new_preferred_date: str = Field(..., description="New date in DD-MM-YYYY format")
+    new_time: str = Field(..., description="New time, e.g., 10:30 AM")
+    contact_email: EmailStr = Field(..., description="Email used to identify the existing appointment")
+
+    @field_validator("new_preferred_date")
+    @classmethod
+    def validate_new_date(cls, v: str) -> str:
+        # You can reuse your existing logic; for now we apply the same parsing rules
+        now = datetime.now()
+        s = _normalize_input(v)
+
+        try:
+            dt = parser.parse(s, dayfirst=True, fuzzy=True)
+        except Exception as e:
+            raise ValueError(f"Could not parse date '{v}': {e}")
+
+        candidate = dt.replace(year=now.year)
+        if candidate.date() <= now.date():
+            candidate = candidate.replace(year=now.year + 1)
+        dt = candidate
+
+        if dt.date() <= now.date():
+            raise ValueError("New appointment date must be after today's date.")
+
+        return dt.strftime("%d-%m-%Y")
+
+
 # ---------------------------------------------------------
 #  Agent setup (Week 1)
 # ---------------------------------------------------------
@@ -109,7 +155,11 @@ agent = Agent(
         "then email, then date, then time and service). "
         "Never list all questions together. "
         "Keep responses short, polite, and natural — like a human conversation. "
-        "Once you have all details, call the appropriate tool yourself. "
+        "When the user clearly wants to BOOK a new appointment, call the `dental_booking_agent` tool "
+        "with the collected details. "
+        "When the user clearly wants to RESCHEDULE an existing appointment, call the "
+        "`reschedule_appointment` tool instead, using their email to look up the existing booking. "
+        "Never claim an appointment is booked or rescheduled unless the tool returns a success status. "
         "If the user says 'yes', figure out what they mean based on context. "
         "You should not deviate from dental topics and if the user inquires about other stuff "
         "except dental booking politely deny the request."
@@ -123,11 +173,16 @@ agent = Agent(
 # ---------------------------------------------------------
 
 appointmentSlots = {
+    "9:00AM": "Available",
+    "10:00AM": "Available",
     "11:30AM": "Available",
-    "1:00PM": "Unavailable",
+    "12:00AM": "Available",
+    "1:00PM": "Available",
     "2:00PM": "Available",
-    "4:00PM": "Unavailable",
+    "4:00PM": "Available",
     "5:00PM": "Available",
+    "6:00AM": "Available",
+    "7:00AM": "Available"
 }
 
 appointmentDetails: Dict[str, Any] = {}
@@ -192,7 +247,7 @@ def dental_booking_agent(ctx: RunContext[None], appointment: Appointment) -> dic
       - Saves user + appointment in Pinecone.
       - Updates appointmentDetails (in-memory).
     """
-
+    print(">>> TOOL CALLED: dental_booking_agent")
     # 1) Parse to datetimes
     start_dt, end_dt = _parse_appointment_to_datetimes(appointment)
 
@@ -268,6 +323,95 @@ def dental_booking_agent(ctx: RunContext[None], appointment: Appointment) -> dic
     )
 
     return {"status": "confirmed", "message": confirmation}
+
+
+@agent.tool
+def reschedule_appointment(ctx: RunContext[None], req: RescheduleRequest) -> dict:
+    """
+    Reschedules the user's latest upcoming confirmed appointment to a new date/time.
+
+    - Finds the nearest upcoming confirmed appointment for the given email.
+    - Moves the Google Calendar event (update, not create).
+    - Updates the existing record in Pinecone (same id).
+    - Returns a human-friendly confirmation message.
+    """
+    user_id = req.contact_email
+    print(">>> TOOL CALLED: reschedule_appointment")
+    # 1) Find existing appointment for this user
+    existing = get_latest_confirmed_future_appointment(user_id)
+    if not existing:
+        return {
+            "status": "not_found",
+            "message": (
+                "I couldn't find any upcoming confirmed appointment for that email. "
+                "Please confirm which appointment you want to change."
+            ),
+        }
+
+    # 2) Build a temporary Appointment-like object so we can reuse parsing logic
+    temp_appointment = Appointment(
+        name=existing.patient_name,
+        preferred_date=req.new_preferred_date,
+        time=req.new_time,
+        reason=existing.reason,
+        contact_email=user_id,
+        contact_phone=None,
+    )
+
+    # 3) Parse new datetime range
+    new_start, new_end = _parse_appointment_to_datetimes(temp_appointment)
+
+    # Optional: if you want, check slot availability. For reschedule, you may skip this
+    # or implement a version of is_slot_free that ignores the existing event.
+    # if not is_slot_free(new_start, new_end):
+    #     return {
+    #         "status": "unavailable",
+    #         "message": "That new time is not available. Please choose a different time.",
+    #     }
+
+    # 4) Update the existing appointment object
+    old_start = existing.start_time
+    old_end = existing.end_time
+
+    existing.start_time = new_start
+    existing.end_time = new_end
+    # status stays "confirmed"
+    # id and google_event_id remain the same
+
+    # 5) Move the Google Calendar event
+    if existing.google_event_id:
+        update_calendar_event(existing)
+    else:
+        # If for some reason the old record had no event id, we can create one now
+        event_id = create_calendar_event(existing)
+        existing.google_event_id = event_id
+
+    # 6) Save updated appointment back to Pinecone (upsert on same id)
+    save_stored_appointment(existing)
+
+    # 7) Optionally update your in-memory appointmentDetails for your /appointment endpoint
+    global appointmentDetails
+    appointmentDetails["name"] = existing.patient_name
+    appointmentDetails["date"] = existing.start_time.strftime("%d-%m-%Y")
+    appointmentDetails["time"] = existing.start_time.strftime("%I:%M %p")
+    appointmentDetails["reason"] = existing.reason
+    appointmentDetails["email"] = user_id
+    appointmentDetails["start_time"] = existing.start_time.isoformat()
+    appointmentDetails["end_time"] = existing.end_time.isoformat()
+    appointmentDetails["google_event_id"] = existing.google_event_id
+    appointmentDetails["user_id"] = user_id
+
+    old_str = old_start.strftime("%d-%m-%Y at %I:%M %p")
+    new_str = new_start.strftime("%d-%m-%Y at %I:%M %p")
+
+    message = (
+        f"✅ Your appointment has been rescheduled.\n"
+        f"Previous: {old_str}\n"
+        f"New: {new_str}\n"
+        f"Reason: {existing.reason}"
+    )
+
+    return {"status": "rescheduled", "message": message}
 
 
 # ---------------------------------------------------------

@@ -4,12 +4,16 @@ from __future__ import annotations
 
 import os
 from datetime import datetime, timedelta, timezone
-
 from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
-
 from .models import StoredAppointment
+from typing import Optional
+
+
+
+
+CALENDAR_ID = os.getenv("GOOGLE_CALENDAR_ID", "primary")
 
 # ENV CONFIG
 GOOGLE_CALENDAR_ID = os.getenv("GOOGLE_CALENDAR_ID", "primary")
@@ -131,3 +135,32 @@ def create_calendar_event(appt: StoredAppointment) -> str:
     )
 
     return created["id"]
+
+def update_calendar_event(stored: StoredAppointment) -> str:
+    """
+    Move an existing Google Calendar event to stored.start_time / stored.end_time.
+    Does NOT create a new event.
+    """
+    if not stored.google_event_id:
+        raise ValueError("Cannot update calendar event: google_event_id is missing.")
+
+    service = get_calendar_service()
+
+    # Fetch existing event
+    event = service.events().get(
+        calendarId=CALENDAR_ID,
+        eventId=stored.google_event_id,
+    ).execute()
+
+    # Update start/end times
+    event["start"]["dateTime"] = stored.start_time.isoformat()
+    event["end"]["dateTime"] = stored.end_time.isoformat()
+
+    updated = service.events().update(
+        calendarId=CALENDAR_ID,
+        eventId=stored.google_event_id,
+        body=event,
+    ).execute()
+
+    # Return event id (unchanged, but kept for consistency)
+    return updated["id"]
