@@ -76,8 +76,11 @@ def is_slot_free(start: datetime, end: datetime) -> bool:
     Check if [start, end) is free in the configured calendar.
 
     Returns:
-        True  -> no overlapping events (slot free)
-        False -> at least one event overlaps (slot busy)
+        True  -> no overlapping *timed* events (slot free)
+        False -> at least one timed event overlaps (slot busy)
+
+    All-day events (with only 'date' but no 'dateTime') are ignored,
+    so holidays or all-day reminders don't block the slot.
     """
     service = get_calendar_service()
 
@@ -96,8 +99,30 @@ def is_slot_free(start: datetime, end: datetime) -> bool:
         .execute()
     )
 
-    events = events_result.get("items", [])
-    return len(events) == 0
+    items = events_result.get("items", []) or []
+
+    # 🔍 Filter out all-day events – we only care about ones with 'dateTime'
+    timed_events = []
+    for ev in items:
+        start_info = ev.get("start", {})
+        end_info = ev.get("end", {})
+        if "dateTime" in start_info or "dateTime" in end_info:
+            timed_events.append(ev)
+
+    # 🔥 Debug logging so you can see what's going on
+    print(">>> is_slot_free called")
+    print(f"    time_min: {time_min}")
+    print(f"    time_max: {time_max}")
+    print(f"    total events returned: {len(items)}")
+    print(f"    timed events considered: {len(timed_events)}")
+    for ev in timed_events:
+        print("    - summary:", ev.get("summary"))
+        print("      start:", ev.get("start"))
+        print("      end  :", ev.get("end"))
+
+    # Slot is free if there are no timed events overlapping
+    return len(timed_events) == 0
+
 
 
 def create_calendar_event(appt: StoredAppointment) -> str:

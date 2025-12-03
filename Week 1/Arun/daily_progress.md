@@ -14,3 +14,5 @@ Plugged pydantic schema to Agent. Successfully received the output in schema for
 9-Nov: Refined the tools and system prompt to get more accurate replies. Added appointment slots to be checked before booking. Converted the agent runs to a simple CLI chatbot loop. Added appointment slots with availability check
 
 28-Nov: Frontend and backend both are working fine. Updated the Web UI - Added dark mode switch, font updated, Added markdown fix so it displays correctly in the chat
+
+03-December: Added Pinecone, Google Calendar + rescheduling appointments implementation. Final working code for Week 3
