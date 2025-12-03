@@ -159,6 +159,13 @@ class CancelRequest(BaseModel):
     contact_email: EmailStr = Field(..., description="Email used when booking the appointment")
 
 
+class GetAppointmentRequest(BaseModel):
+    """
+    Data needed to look up an existing appointment.
+    For now we return the nearest upcoming confirmed appointment for this email.
+    """
+    contact_email: EmailStr = Field(..., description="Email used when booking the appointment")
+
 
 
 # ---------------------------------------------------------
@@ -223,7 +230,10 @@ agent = Agent(
         "`reschedule_appointment` tool instead, using their email to look up the existing booking.\n"
         "When the user clearly wants to CANCEL an existing appointment, call the `cancel_appointment` tool, "
         "again using their email to find the upcoming booking.\n"
-        "Never claim an appointment is booked, rescheduled, or cancelled unless the corresponding tool returns a success status.\n"
+        "When the user asks to VIEW or CHECK their existing appointment details, call the "
+        "`get_appointment_details` tool using their email.\n"
+        "Never claim an appointment is booked, rescheduled, cancelled, or retrieved unless the corresponding "
+        "tool returns a success status.\n"
         "If the user says 'yes', figure out what they mean based on context. "
         "You should not deviate from dental topics and if the user inquires about other stuff "
         "except dental booking politely deny the request. "
@@ -473,6 +483,82 @@ def cancel_appointment(ctx: RunContext[None], req: CancelRequest) -> dict:
         return {
             "status": "error",
             "message": f"Sorry, I couldn't cancel your appointment due to an internal error: {e}",
+        }
+
+
+@agent.tool
+def get_appointment_details(ctx: RunContext[None], req: GetAppointmentRequest) -> dict:
+    """
+    Returns the nearest upcoming confirmed appointment for this email, if any.
+
+    Used by the LLM when the user asks things like:
+    - "What is my appointment?"
+    - "Do I have anything booked?"
+    - "When is my next appointment?"
+    """
+    print(">>> TOOL CALLED: get_appointment_details")
+    try:
+        user_id = req.contact_email
+
+        existing = get_latest_confirmed_future_appointment(user_id)
+        if not existing:
+            return {
+                "status": "not_found",
+                "message": (
+                    "I couldn't find any upcoming confirmed appointment for that email. "
+                    "If you think you have a booking, please double-check the email you used."
+                ),
+            }
+
+        # Build a clean, serializable representation
+        start_local = existing.start_time.astimezone(KOLKATA)
+        end_local = existing.end_time.astimezone(KOLKATA)
+
+        result = {
+            "status": "found",
+            "appointment_id": existing.id,
+            "patient_name": existing.patient_name,
+            "reason": existing.reason,
+            "status_value": existing.status,
+            "start_time": start_local.isoformat(),
+            "end_time": end_local.isoformat(),
+            "date_display": start_local.strftime("%d-%m-%Y"),
+            "time_display": start_local.strftime("%I:%M %p"),
+            "google_event_id": existing.google_event_id,
+            "user_id": existing.user_id,
+        }
+
+        # Optionally also update in-memory appointmentDetails so /appointment reflects this
+        global appointmentDetails
+        appointmentDetails["name"] = existing.patient_name
+        appointmentDetails["date"] = result["date_display"]
+        appointmentDetails["time"] = result["time_display"]
+        appointmentDetails["reason"] = existing.reason
+        appointmentDetails["email"] = user_id
+        appointmentDetails["start_time"] = result["start_time"]
+        appointmentDetails["end_time"] = result["end_time"]
+        appointmentDetails["google_event_id"] = existing.google_event_id
+        appointmentDetails["user_id"] = existing.user_id
+        appointmentDetails["status"] = existing.status
+
+        # Human-friendly summary the LLM can echo
+        summary = (
+            "Here are your upcoming appointment details:\n"
+            f"- Name: {existing.patient_name}\n"
+            f"- Date: {result['date_display']}\n"
+            f"- Time: {result['time_display']}\n"
+            f"- Reason: {existing.reason}\n"
+            f"- Status: {existing.status}"
+        )
+
+        result["message"] = summary
+        return result
+
+    except Exception as e:
+        print(">>> get_appointment_details ERROR:", repr(e))
+        return {
+            "status": "error",
+            "message": f"Sorry, I couldn't fetch your appointment details due to an internal error: {e}",
         }
 
 
