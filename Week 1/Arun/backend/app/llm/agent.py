@@ -55,7 +55,7 @@ class Appointment(BaseModel):
     preferred_date: str = Field(..., description="Appointment date in DD-MM-YYYY format or natural language")
     time: str = Field(..., description="Appointment time, flexible format")
     reason: str = Field(..., description="Reason for visit, e.g., Cleaning, Check-up, etc.")
-    contact_email: EmailStr | None = None
+    contact_email: EmailStr = Field(..., description="Email address used for booking")
     contact_phone: str = Field(..., description="10 digit phone number")
 
     @field_validator("preferred_date")
