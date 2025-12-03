@@ -23,7 +23,9 @@ from app.google_calendar import (
     is_slot_free,
     create_calendar_event,
     update_calendar_event,
+    cancel_calendar_event,
 )
+
 
 # ---------------------------------------------------------
 #  Timezone setup
@@ -149,6 +151,16 @@ class RescheduleRequest(BaseModel):
         return parsed.strftime("%I:%M %p")
 
 
+class CancelRequest(BaseModel):
+    """
+    Data needed to cancel an existing appointment.
+    For now, we cancel the nearest upcoming confirmed appointment for this email.
+    """
+    contact_email: EmailStr = Field(..., description="Email used when booking the appointment")
+
+
+
+
 # ---------------------------------------------------------
 #  Global details for /appointment endpoint
 # ---------------------------------------------------------
@@ -209,7 +221,9 @@ agent = Agent(
         "with the collected details.\n"
         "When the user clearly wants to RESCHEDULE an existing appointment, call the "
         "`reschedule_appointment` tool instead, using their email to look up the existing booking.\n"
-        "Never claim an appointment is booked or rescheduled unless the tool returns a success status.\n"
+        "When the user clearly wants to CANCEL an existing appointment, call the `cancel_appointment` tool, "
+        "again using their email to find the upcoming booking.\n"
+        "Never claim an appointment is booked, rescheduled, or cancelled unless the corresponding tool returns a success status.\n"
         "If the user says 'yes', figure out what they mean based on context. "
         "You should not deviate from dental topics and if the user inquires about other stuff "
         "except dental booking politely deny the request. "
@@ -397,6 +411,70 @@ def reschedule_appointment(ctx: RunContext[None], req: RescheduleRequest) -> dic
             "status": "error",
             "message": f"Sorry, I couldn't reschedule your appointment due to an internal error: {e}",
         }
+    
+
+
+@agent.tool
+def cancel_appointment(ctx: RunContext[None], req: CancelRequest) -> dict:
+    """
+    Cancels the user's nearest upcoming confirmed appointment.
+
+    - Finds the nearest upcoming confirmed appointment for the given email.
+    - Deletes the corresponding Google Calendar event (if any).
+    - Marks the appointment as 'cancelled' in Pinecone (same id, not removed).
+    - Updates in-memory appointmentDetails.
+    """
+    print(">>> TOOL CALLED: cancel_appointment")
+    try:
+        user_id = req.contact_email
+
+        # 1) Find existing upcoming confirmed appointment
+        existing = get_latest_confirmed_future_appointment(user_id)
+        if not existing:
+            return {
+                "status": "not_found",
+                "message": (
+                    "I couldn't find any upcoming confirmed appointment for that email. "
+                    "If you think there should be one, please double-check the email you used when booking."
+                ),
+            }
+
+        # 2) Cancel the calendar event (soft-fail if it errors)
+        cancel_calendar_event(existing)
+
+        # 3) Mark as cancelled in persistence
+        existing.status = "cancelled"
+        save_stored_appointment(existing)
+
+        # 4) Update in-memory appointmentDetails
+        global appointmentDetails
+        appointmentDetails["name"] = existing.patient_name
+        appointmentDetails["date"] = existing.start_time.strftime("%d-%m-%Y")
+        appointmentDetails["time"] = existing.start_time.strftime("%I:%M %p")
+        appointmentDetails["reason"] = existing.reason
+        appointmentDetails["email"] = user_id
+        appointmentDetails["start_time"] = existing.start_time.isoformat()
+        appointmentDetails["end_time"] = existing.end_time.isoformat()
+        appointmentDetails["google_event_id"] = existing.google_event_id
+        appointmentDetails["user_id"] = user_id
+        appointmentDetails["status"] = "cancelled"
+
+        when_str = existing.start_time.strftime("%d-%m-%Y at %I:%M %p")
+        message = (
+            "✅ Your appointment has been cancelled.\n"
+            f"Cancelled appointment was scheduled for {when_str}.\n"
+            "If you’d like, I can help you book a new time."
+        )
+
+        return {"status": "cancelled", "message": message}
+
+    except Exception as e:
+        print(">>> cancel_appointment ERROR:", repr(e))
+        return {
+            "status": "error",
+            "message": f"Sorry, I couldn't cancel your appointment due to an internal error: {e}",
+        }
+
 
 
 # ---------------------------------------------------------

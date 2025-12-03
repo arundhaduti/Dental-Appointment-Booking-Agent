@@ -189,3 +189,25 @@ def update_calendar_event(stored: StoredAppointment) -> str:
 
     # Return event id (unchanged, but kept for consistency)
     return updated["id"]
+
+
+def cancel_calendar_event(stored: StoredAppointment) -> None:
+    """
+    Cancel/delete the Google Calendar event for this appointment, if any.
+    Does nothing if google_event_id is missing.
+    """
+    if not stored.google_event_id:
+        print(">>> cancel_calendar_event: no google_event_id on stored appointment, nothing to cancel.")
+        return
+
+    service = get_calendar_service()
+
+    try:
+        service.events().delete(
+            calendarId=GOOGLE_CALENDAR_ID,
+            eventId=stored.google_event_id,
+        ).execute()
+        print(f">>> cancel_calendar_event: deleted event {stored.google_event_id}")
+    except Exception as e:
+        # Don't hard-fail the whole flow if calendar deletion fails
+        print(f">>> cancel_calendar_event ERROR for {stored.google_event_id}:", repr(e))
