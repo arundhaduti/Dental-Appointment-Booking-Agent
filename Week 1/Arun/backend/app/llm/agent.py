@@ -24,7 +24,9 @@ from app.google_calendar import (
     create_calendar_event,
     update_calendar_event,
     cancel_calendar_event,
+    find_alternative_slots,
 )
+
 
 
 # ---------------------------------------------------------
@@ -243,6 +245,10 @@ agent = Agent(
         "The tool validation logic will normalize and choose the correct absolute date.\n\n"
         "When the user clearly wants to BOOK a new appointment, call the `dental_booking_agent` tool "
         "with the collected details.\n"
+        "When the booking tool returns an 'unavailable' status with suggested alternative slots "
+        "(for example in an 'alternatives' field or listed in the tool's message), you MUST present "
+        "those suggested slots back to the user and ask them to pick one. "
+        "Do NOT ask the user to invent a completely new date or time yourself.\n"
         "When the user clearly wants to RESCHEDULE an existing appointment, call the "
         "`reschedule_appointment` tool instead, using their email to look up the existing booking.\n"
         "When the user clearly wants to CANCEL an existing appointment, call the `cancel_appointment` tool, "
@@ -289,14 +295,53 @@ def dental_booking_agent(ctx: RunContext[None], appointment: Appointment) -> dic
         else:
             user_id = f"user:{patient_name}:{appointment.contact_phone}"
 
-        # 2) Check Google Calendar slot
+                # 2) Check Google Calendar slot
         if not is_slot_free(start_dt, end_dt):
+            # Find nearby alternative slots
+            alternatives = find_alternative_slots(start_dt, duration_minutes=30, max_suggestions=4)
+
+            if alternatives:
+                lines = []
+                alt_structs = []
+
+                for alt_start, alt_end in alternatives:
+                    alt_local = alt_start.astimezone(KOLKATA)
+                    date_display = alt_local.strftime("%d-%m-%Y")
+                    time_display = alt_local.strftime("%I:%M %p")
+
+                    lines.append(f"* {date_display} — {time_display}")
+                    alt_structs.append(
+                        {
+                            "start_time": alt_start.isoformat(),
+                            "end_time": alt_end.isoformat(),
+                            "date_display": date_display,
+                            "time_display": time_display,
+                        }
+                    )
+
+                msg = (
+                    f"❌ Sorry {patient_name}, that time slot on {appointment.preferred_date} "
+                    f"at {appointment.time} is already booked.\n\n"
+                    "Here are the closest available times:\n"
+                    + "\n".join(lines)
+                    + "\n\nWhich one would you like to book?"
+                )
+
+                # The LLM will see this message and should ask the user to pick one
+                return {
+                    "status": "unavailable",
+                    "message": msg,
+                    "alternatives": alt_structs,
+                }
+
+            # Fallback: no alternatives found
             msg = (
                 f"❌ Sorry {patient_name}, that time slot on {appointment.preferred_date} "
-                f"at {appointment.time} is already booked. "
-                "Would you like to try a different time on the same date, or choose a different date?"
+                f"at {appointment.time} is already booked, and I couldn't find any nearby free slots. "
+                "Would you like to try a different date?"
             )
             return {"status": "unavailable", "message": msg}
+
 
         # 3) Create StoredAppointment for persistence
         stored = StoredAppointment(

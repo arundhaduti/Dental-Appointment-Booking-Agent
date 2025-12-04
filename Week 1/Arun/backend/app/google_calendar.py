@@ -9,6 +9,8 @@ from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
 from .models import StoredAppointment
 from typing import Optional
+from typing import List, Tuple
+
 
 
 
@@ -122,6 +124,53 @@ def is_slot_free(start: datetime, end: datetime) -> bool:
 
     # Slot is free if there are no timed events overlapping
     return len(timed_events) == 0
+
+
+def find_alternative_slots(
+    requested_start: datetime,
+    duration_minutes: int = 30,
+    max_suggestions: int = 4,
+) -> List[Tuple[datetime, datetime]]:
+    """
+    Find up to `max_suggestions` nearby free slots around the requested_start,
+    using Google Calendar availability.
+
+    Strategy:
+      - Look in +/- 2 slots (i.e., +/- 1 hour) around the requested time,
+        and forward up to ~4 hours.
+      - Only consider times in the future (IST).
+      - Use the same is_slot_free() logic for checking.
+    """
+    now_ist = datetime.now(IST)
+    slot_delta = timedelta(minutes=duration_minutes)
+
+    suggestions: List[Tuple[datetime, datetime]] = []
+
+    # Search window in units of slots (30min each by default)
+    # Example: i = -2, -1, 1, 2, 3, 4, 5, 6
+    for i in range(-2, 9):
+        if i == 0:
+            continue
+
+        candidate_start = requested_start + i * slot_delta
+        candidate_end = candidate_start + slot_delta
+
+        # Ignore slots in the past
+        if candidate_start < now_ist:
+            continue
+
+        try:
+            if is_slot_free(candidate_start, candidate_end):
+                suggestions.append((candidate_start, candidate_end))
+        except Exception as e:
+            print(">>> find_alternative_slots: is_slot_free error:", repr(e))
+            continue
+
+        if len(suggestions) >= max_suggestions:
+            break
+
+    return suggestions
+
 
 
 
