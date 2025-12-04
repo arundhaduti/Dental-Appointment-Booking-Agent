@@ -1,5 +1,5 @@
 from __future__ import annotations
-
+import tiktoken
 import os
 import re
 import uuid
@@ -28,6 +28,14 @@ from app.google_calendar import (
 )
 
 
+#  ------------------------------------------------------
+#   To measure tokens
+#  ------------------------------------------------------
+
+def count_tokens(text: str, model: str = "gpt-4") -> int:
+    encoding = tiktoken.encoding_for_model(model)
+    return len(encoding.encode(text))
+
 
 # ---------------------------------------------------------
 #  Timezone setup
@@ -43,6 +51,35 @@ except Exception:
 TODAY_IST = datetime.now(KOLKATA)
 TODAY_IST_STR = TODAY_IST.strftime("%d-%m-%Y")
 TODAY_IST_VERBOSE = TODAY_IST.strftime("%d %B %Y")
+
+
+# ---------------------------------------------------------
+#  Clinic working hours (IST)
+# ---------------------------------------------------------
+
+CLINIC_OPEN_HOUR = 9    # 9:00
+CLINIC_LUNCH_START = 13 # 13:00 (1 PM)
+CLINIC_LUNCH_END = 14   # 14:00 (2 PM)
+CLINIC_CLOSE_HOUR = 18  # 18:00 (6 PM)
+
+
+def is_within_working_hours(dt: datetime) -> bool:
+    """
+    Return True if the given datetime (any timezone) falls within
+    clinic working hours in Asia/Kolkata, excluding lunch break.
+    """
+    local = dt.astimezone(KOLKATA)
+    h = local.hour + local.minute / 60.0
+
+    if h < CLINIC_OPEN_HOUR or h >= CLINIC_CLOSE_HOUR:
+        return False
+
+    # Exclude lunch break
+    if CLINIC_LUNCH_START <= h < CLINIC_LUNCH_END:
+        return False
+
+    return True
+
 
 
 
@@ -228,9 +265,7 @@ openrouter_provider = OpenAIProvider(
 
 model = OpenAIChatModel("kwaipilot/kat-coder-pro:free", provider=openrouter_provider)
 
-agent = Agent(
-    model=model,
-    system_prompt=(
+sys_prompt=(
         "You are a friendly and conversational dental assistant. "
         "Ask for only one piece of information at a time (e.g., first ask for their name, "
         "then email, then date, then time and service). "
@@ -251,6 +286,13 @@ agent = Agent(
         "Do NOT ask the user to invent a completely new date or time yourself.\n"
         "When the user clearly wants to RESCHEDULE an existing appointment, call the "
         "`reschedule_appointment` tool instead, using their email to look up the existing booking.\n"
+        "Your clinic working hours are:\n"
+        "- 9:00 AM to 1:00 PM\n"
+        "- 2:00 PM to 6:00 PM\n"
+        "You must NOT suggest or attempt to book appointments outside these hours, and you must NOT book during lunch "
+        "(1:00 PM to 2:00 PM).\n"
+        "If a user asks for a time outside working hours, politely explain the working hours and offer valid times "
+        "within the schedule instead.\n"
         "When the user clearly wants to CANCEL an existing appointment, call the `cancel_appointment` tool, "
         "again using their email to find the upcoming booking.\n"
         "When the user asks to VIEW or CHECK their existing appointment details, call the "
@@ -261,10 +303,17 @@ agent = Agent(
         "You should not deviate from dental topics and if the user inquires about other stuff "
         "except dental booking politely deny the request. "
         "Confirm the appointment with summary of the booking right after successful booking/rescheduling."
-    ),
+    )
+
+agent = Agent(
+    model=model,
+    system_prompt=sys_prompt,
     retries=3,
 )
 
+# Before optimization
+old_prompt_tokens = count_tokens(sys_prompt)
+print(f"Current token usage is: {old_prompt_tokens} tokens per request")
 
 # ---------------------------------------------------------
 #  Tool: Book appointment (Pinecone + Google Calendar)
@@ -288,6 +337,21 @@ def dental_booking_agent(ctx: RunContext[None], appointment: Appointment) -> dic
 
         patient_name = appointment.name
         reason = appointment.reason or "Dental appointment"
+
+                # 1.5) Enforce clinic working hours
+        if not (is_within_working_hours(start_dt) and is_within_working_hours(end_dt)):
+            hours_msg = (
+                "Our clinic operates from 9:00 AM to 1:00 PM and from 2:00 PM to 6:00 PM, "
+                "and we do not book appointments during the lunch break (1:00 PM – 2:00 PM)."
+            )
+            msg = (
+                f"❌ The requested time on {appointment.preferred_date} at {appointment.time} "
+                "is outside our working hours or during our lunch break.\n\n"
+                f"{hours_msg}\n"
+                "Please choose a time within these hours."
+            )
+            return {"status": "outside_hours", "message": msg}
+
 
         # Build a user_id for persistence (prefer email)
         if appointment.contact_email:
@@ -437,6 +501,20 @@ def reschedule_appointment(ctx: RunContext[None], req: RescheduleRequest) -> dic
         # 2) Parse new datetimes directly (no Appointment model, so no phone required)
         new_start, new_end = parse_date_time(req.new_preferred_date, req.new_time)
         old_start = existing.start_time
+
+                # 2.5) Enforce clinic working hours for reschedule
+        if not (is_within_working_hours(new_start) and is_within_working_hours(new_end)):
+            hours_msg = (
+                "Our clinic operates from 9:00 AM to 1:00 PM and from 2:00 PM to 6:00 PM, "
+                "and we do not book appointments during the lunch break (1:00 PM – 2:00 PM)."
+            )
+            msg = (
+                "The new requested time is outside our working hours or during our lunch break.\n\n"
+                f"{hours_msg}\n"
+                "Please choose a time within these hours."
+            )
+            return {"status": "outside_hours", "message": msg}
+
 
         # 3) Update the existing appointment object
         existing.start_time = new_start

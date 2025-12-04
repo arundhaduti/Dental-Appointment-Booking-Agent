@@ -126,6 +126,30 @@ def is_slot_free(start: datetime, end: datetime) -> bool:
     return len(timed_events) == 0
 
 
+# Same working hours as agent.py (keep in sync manually)
+CLINIC_OPEN_HOUR = 9
+CLINIC_LUNCH_START = 13
+CLINIC_LUNCH_END = 14
+CLINIC_CLOSE_HOUR = 18
+
+
+def _is_within_working_hours_local(dt: datetime) -> bool:
+    """
+    Local helper for calendar-based suggestions.
+    dt may be any timezone; we convert to IST for comparison.
+    """
+    local = dt.astimezone(IST)
+    h = local.hour + local.minute / 60.0
+
+    if h < CLINIC_OPEN_HOUR or h >= CLINIC_CLOSE_HOUR:
+        return False
+
+    if CLINIC_LUNCH_START <= h < CLINIC_LUNCH_END:
+        return False
+
+    return True
+
+
 def find_alternative_slots(
     requested_start: datetime,
     duration_minutes: int = 30,
@@ -133,21 +157,13 @@ def find_alternative_slots(
 ) -> List[Tuple[datetime, datetime]]:
     """
     Find up to `max_suggestions` nearby free slots around the requested_start,
-    using Google Calendar availability.
-
-    Strategy:
-      - Look in +/- 2 slots (i.e., +/- 1 hour) around the requested time,
-        and forward up to ~4 hours.
-      - Only consider times in the future (IST).
-      - Use the same is_slot_free() logic for checking.
+    using Google Calendar availability, but only within clinic working hours.
     """
     now_ist = datetime.now(IST)
     slot_delta = timedelta(minutes=duration_minutes)
 
     suggestions: List[Tuple[datetime, datetime]] = []
 
-    # Search window in units of slots (30min each by default)
-    # Example: i = -2, -1, 1, 2, 3, 4, 5, 6
     for i in range(-2, 9):
         if i == 0:
             continue
@@ -155,8 +171,12 @@ def find_alternative_slots(
         candidate_start = requested_start + i * slot_delta
         candidate_end = candidate_start + slot_delta
 
-        # Ignore slots in the past
+        # Ignore past slots
         if candidate_start < now_ist:
+            continue
+
+        # Enforce working hours
+        if not (_is_within_working_hours_local(candidate_start) and _is_within_working_hours_local(candidate_end)):
             continue
 
         try:
@@ -170,6 +190,7 @@ def find_alternative_slots(
             break
 
     return suggestions
+
 
 
 
