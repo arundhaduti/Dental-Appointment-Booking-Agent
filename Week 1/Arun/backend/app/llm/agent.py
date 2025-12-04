@@ -37,6 +37,12 @@ try:
 except Exception:
     KOLKATA = timezone(timedelta(hours=5, minutes=30))
 
+# Today's date in IST, used for both tools and prompt anchoring
+TODAY_IST = datetime.now(KOLKATA)
+TODAY_IST_STR = TODAY_IST.strftime("%d-%m-%Y")
+TODAY_IST_VERBOSE = TODAY_IST.strftime("%d %B %Y")
+
+
 
 def _normalize_input(s: str) -> str:
     s = (s or "").strip().lower()
@@ -63,7 +69,8 @@ class Appointment(BaseModel):
     @field_validator("preferred_date")
     @classmethod
     def validate_preferred_date(cls, v: str) -> str:
-        now = datetime.now()
+        # Always interpret relative dates like 'tomorrow' in IST
+        now = datetime.now(KOLKATA)
         s = _normalize_input(v)
         try:
             dt = parser.parse(s, dayfirst=True, fuzzy=True)
@@ -74,7 +81,9 @@ class Appointment(BaseModel):
         if candidate.date() <= now.date():
             candidate = candidate.replace(year=now.year + 1)
         dt = candidate
+
         return dt.strftime("%d-%m-%Y")
+
 
     @field_validator("time")
     @classmethod
@@ -123,7 +132,7 @@ class RescheduleRequest(BaseModel):
     @field_validator("new_preferred_date")
     @classmethod
     def validate_new_date(cls, v: str) -> str:
-        now = datetime.now()
+        now = datetime.now(KOLKATA)
         s = _normalize_input(v)
 
         try:
@@ -140,6 +149,7 @@ class RescheduleRequest(BaseModel):
             raise ValueError("New appointment date must be after today's date.")
 
         return dt.strftime("%d-%m-%Y")
+
 
     @field_validator("new_time")
     @classmethod
@@ -224,6 +234,13 @@ agent = Agent(
         "then email, then date, then time and service). "
         "Never list all questions together. "
         "Keep responses short, polite, and natural — like a human conversation.\n\n"
+        f"Today is {TODAY_IST_VERBOSE} in the Asia/Kolkata timezone. "
+        "When the user says things like 'today', 'tomorrow', or 'day after tomorrow', "
+        "you must interpret them relative to this date.\n\n"
+        "IMPORTANT: Do NOT convert natural language dates into specific calendar dates yourself. "
+        "Whenever the user gives a phrase like 'tomorrow', 'day after tomorrow', 'next Monday', etc., "
+        "pass that phrase AS-IS into the tools as the date field (preferred_date or new_preferred_date). "
+        "The tool validation logic will normalize and choose the correct absolute date.\n\n"
         "When the user clearly wants to BOOK a new appointment, call the `dental_booking_agent` tool "
         "with the collected details.\n"
         "When the user clearly wants to RESCHEDULE an existing appointment, call the "
