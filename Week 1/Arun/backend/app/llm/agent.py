@@ -338,7 +338,7 @@ def moderation_guard(ctx: RunContext[None], req: ModerationRequest) -> dict:
     It:
       - Increments an internal violation counter.
       - Returns a message the assistant should send back.
-      - Signals when the conversation should effectively be "ended" until user behaves.
+      - Signals when the conversation should effectively be "ended".
     """
     _violation_state["count"] += 1
     count = _violation_state["count"]
@@ -362,7 +362,9 @@ def moderation_guard(ctx: RunContext[None], req: ModerationRequest) -> dict:
         end_conversation = False
 
     else:
+        # 🔒 Add a special marker so the UI knows the conversation is locked
         message = (
+            "[CONVERSATION_LOCKED]\n"
             "I can only assist with dental appointment bookings and will not continue this "
             "conversation while you send inappropriate messages."
         )

@@ -6,6 +6,8 @@ import remarkGfm from 'remark-gfm'
 const BOT_GREETING =
   'Hello - I am your dental appointment assistant. How can I help you?'
 
+const LOCK_MARKER = "[CONVERSATION_LOCKED]"
+
 // ---------- base styles ----------
 const basePageStyle = {
   minHeight: '100vh',
@@ -111,15 +113,18 @@ const inputRowStyle = {
   marginTop: 12,
 }
 
-const textInputStyle = (dark) => ({
+const textInputStyle = (dark, locked) => ({
   flex: 1,
   padding: '10px 12px',
   borderRadius: 999,
   border: `1px solid ${dark ? '#4b5563' : '#d1d5db'}`,
   outline: 'none',
   fontSize: 14,
-  background: dark ? '#020617' : '#ffffff',
+  background: locked
+    ? (dark ? '#111827' : '#e5e7eb')
+    : (dark ? '#020617' : '#ffffff'),
   color: dark ? '#e5e7eb' : '#111827',
+  opacity: locked ? 0.6 : 1,
 })
 
 const sendButtonStyle = (disabled) => ({
@@ -199,14 +204,15 @@ export default function App() {
   const [input, setInput] = useState('')
   const [loading, setLoading] = useState(false)
   const [darkMode, setDarkMode] = useState(false)
+  const [locked, setLocked] = useState(false)  // 🔒 NEW
   const bottomRef = useRef(null)
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
-  }, [messages, loading])
+  }, [messages, loading, locked])
 
   const sendMessage = async () => {
-    if (!input.trim() || loading) return
+    if (!input.trim() || loading || locked) return
 
     const userText = input.trim()
     const userMsg = { from: 'user', text: userText }
@@ -223,7 +229,14 @@ export default function App() {
       })
 
       const data = await res.json()
-      const reply = data.reply || data.error || 'No reply.'
+      let reply = data.reply || data.error || 'No reply.'
+
+      // 🔒 Detect lock marker
+      if (reply.startsWith(LOCK_MARKER)) {
+        setLocked(true)
+        reply = reply.replace(LOCK_MARKER, '').trim()
+      }
+
       const agentMsg = { from: 'agent', text: reply }
       setMessages((m) => [...m, agentMsg])
     } catch (err) {
@@ -247,12 +260,11 @@ export default function App() {
     setMessages([{ from: 'agent', text: BOT_GREETING }])
     setInput('')
     setLoading(false)
+    setLocked(false)   // 🔓 unlock
 
     try {
       await fetch('http://localhost:8000/reset', { method: 'POST' })
-    } catch {
-      // ignore; UI already reset
-    }
+    } catch {}
   }
 
   const toggleDarkMode = () => setDarkMode((d) => !d)
@@ -293,6 +305,25 @@ export default function App() {
             </button>
           </div>
         </header>
+
+        {/* 🔒 LOCKOUT BANNER */}
+        {locked && (
+          <div
+            style={{
+              padding: '10px 14px',
+              marginBottom: 10,
+              borderRadius: 8,
+              background: '#fee2e2',
+              border: '1px solid #fecaca',
+              color: '#b91c1c',
+              fontSize: 14,
+              fontWeight: 500,
+            }}
+          >
+            Conversation locked due to repeated violations.  
+            Click **Start over** to begin a new session.
+          </div>
+        )}
 
         <div style={chatContainerStyle(darkMode)}>
           {messages.map((m, i) => (
@@ -353,16 +384,19 @@ export default function App() {
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={handleKeyDown}
-            placeholder="Type your message..."
-            style={textInputStyle(darkMode)}
+            placeholder={
+              locked ? "Conversation locked. Click Start over." : "Type your message..."
+            }
+            disabled={loading || locked}
+            style={textInputStyle(darkMode, locked)}
           />
           <button
             type="button"
             onClick={sendMessage}
-            disabled={loading || !input.trim()}
-            style={sendButtonStyle(loading || !input.trim())}
+            disabled={loading || !input.trim() || locked}
+            style={sendButtonStyle(loading || !input.trim() || locked)}
           >
-            {loading ? '...' : 'Send'}
+            {locked ? 'Locked' : loading ? '...' : 'Send'}
           </button>
         </div>
       </div>
