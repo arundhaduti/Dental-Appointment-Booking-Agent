@@ -91,6 +91,22 @@ def _normalize_input(s: str) -> str:
 
 
 # ---------------------------------------------------------
+#  Tracks how many times the user sent inappropriate content in this conversation
+# ---------------------------------------------------------
+
+_violation_state: Dict[str, int] = {"count": 0}
+
+
+def reset_violation_state() -> None:
+    """
+    Reset the moderation violation counter.
+    Call this from /reset so new sessions start clean.
+    """
+    _violation_state["count"] = 0
+
+
+
+# ---------------------------------------------------------
 #  Models
 # ---------------------------------------------------------
 
@@ -216,6 +232,14 @@ class GetAppointmentRequest(BaseModel):
     contact_email: EmailStr = Field(..., description="Email used when booking the appointment")
 
 
+class ModerationRequest(BaseModel):
+    """
+    Used when the assistant detects inappropriate content.
+    'reason' is a short description such as 'sexual content', 'harassment', etc.
+    """
+    reason: str = Field(..., description="Why the message is inappropriate (e.g. 'sexual content', 'harassment').")
+
+
 
 # ---------------------------------------------------------
 #  Global details for /appointment endpoint
@@ -277,13 +301,19 @@ sys_prompt=(
         "'unavailable' with alternatives, present those suggested slots and ask the user to pick one; do NOT "
         "ask the user to invent new dates/times.\n"
         "If the user wants to RESCHEDULE, call reschedule_appointment using their email to find the booking.\n"
-        "Clinic hours (IST): 9:00–13:00 and 14:00–18:00. Do NOT suggest or book outside these hours or during "
-        "lunch (13:00–14:00). If asked for an outside time, explain the hours and offer valid times.\n"
+        "Clinic hours (IST): 9:00-13:00 and 14:00-18:00. Do NOT suggest or book outside these hours or during "
+        "lunch (13:00-14:00). If asked for an outside time, explain the hours and offer valid times.\n"
         "If the user wants to CANCEL, call cancel_appointment with their email. To VIEW/CHECK an appointment, call "
         "get_appointment_details with their email.\n"
         "Never claim an appointment is booked, rescheduled, cancelled, or retrieved unless the corresponding tool "
         "returns success. If the user says 'yes', infer intent from context. Restrict to dental booking topics; "
         "politely refuse unrelated requests. After successful booking/rescheduling, confirm with a summary."
+        "If a user message contains sexual content, harassment, abusive language, explicit or inappropriate statements, or "
+        "violent or hateful speech, you must not answer it or call any booking tools. Instead, call the `moderation_guard` tool "
+        "with a short reason (e.g., 'sexual content', 'harassment', 'violence'). Use only the message returned by that tool as your reply. "
+        "If the tool indicates that the conversation is ended due to repeated violations, you must not respond with anything "
+        "else and must repeat only that boundary message until the user returns to appropriate dental-booking questions."
+
     )
 
 agent = Agent(
@@ -299,6 +329,55 @@ print(f"Current token usage is: {old_prompt_tokens} tokens per request")
 # ---------------------------------------------------------
 #  Tool: Book appointment (Pinecone + Google Calendar)
 # ---------------------------------------------------------
+
+@agent.tool
+def moderation_guard(ctx: RunContext[None], req: ModerationRequest) -> dict:
+    """
+    Called by the LLM whenever it detects inappropriate content in the user's message.
+
+    It:
+      - Increments an internal violation counter.
+      - Returns a message the assistant should send back.
+      - Signals when the conversation should effectively be "ended" until user behaves.
+    """
+    _violation_state["count"] += 1
+    count = _violation_state["count"]
+
+    if count == 1:
+        message = (
+            "I can’t respond to that.\n"
+            "I’m here to help you book a dental appointment.\n"
+            "When would you like to schedule your visit?"
+        )
+        status = "warn"
+        end_conversation = False
+
+    elif count == 2:
+        message = (
+            "I’m only able to assist with dental appointment bookings.\n"
+            "Please keep the conversation appropriate.\n"
+            "When would you like your dental appointment?"
+        )
+        status = "warn"
+        end_conversation = False
+
+    else:
+        message = (
+            "I can only assist with dental appointment bookings and will not continue this "
+            "conversation while you send inappropriate messages."
+        )
+        status = "blocked"
+        end_conversation = True
+
+    return {
+        "status": status,
+        "message": message,
+        "violation_count": count,
+        "end_conversation": end_conversation,
+        "reason": req.reason,
+    }
+
+
 
 @agent.tool
 def dental_booking_agent(ctx: RunContext[None], appointment: Appointment) -> dict:

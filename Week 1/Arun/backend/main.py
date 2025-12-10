@@ -7,6 +7,8 @@ from typing import List, Optional, Dict, Any
 from app.rate_limit import rate_limiter
 import asyncio
 import uuid
+from backend.app.llm.agent import reset_violation_state
+
 
 # Week 1 agent and tools
 from app.llm.agent import (
@@ -137,17 +139,18 @@ async def get_latest_appointment():
 
 @app.post("/reset")
 async def reset_chat():
-    """
-    Reset server-side conversation state so the next web chat
-    behaves like a fresh CLI session.
-    """
     global msg_history, appointmentDetails
     msg_history = []
     try:
         appointmentDetails.clear()
     except Exception:
         appointmentDetails = {}
+
+    # Reset moderation violations for a fresh conversation
+    reset_violation_state()
+
     return {"status": "ok"}
+
 
 
 # ---------- Week 3: Google Calendar + Pinecone appointments ----------
