@@ -16,3 +16,6 @@ Plugged pydantic schema to Agent. Successfully received the output in schema for
 28-Nov: Frontend and backend both are working fine. Updated the Web UI - Added dark mode switch, font updated, Added markdown fix so it displays correctly in the chat
 
 03-December: Added Pinecone, Google Calendar + rescheduling appointments implementation. Final working code for Week 3
+
+10-December: Added conversation lockout feature in case of sexual content, harassment, abusive language, explicit or inappropriate statements, or violent or hateful speech.
+Week 4 completed. All test cases verified.

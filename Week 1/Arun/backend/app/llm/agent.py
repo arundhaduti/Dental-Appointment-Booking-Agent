@@ -292,7 +292,7 @@ model = OpenAIChatModel("kwaipilot/kat-coder-pro:free", provider=openrouter_prov
 sys_prompt=(
         "You are a friendly, concise dental assistant. Ask only one piece of information at a time "
         "(e.g., name → email → date → time → service); never list all questions. Keep replies short, "
-        "polite and natural.\n\n"
+        "polite and natural. Do NOT assume any information.\n\n"
         f"Today is {TODAY_IST_VERBOSE} in Asia/Kolkata. Interpret relative phrases (e.g. 'today', 'tomorrow', "
         "'day after tomorrow', 'next Monday') relative to this date.\n\n"
         "IMPORTANT: Do NOT convert natural-language date phrases to absolute dates yourself. Pass date phrases "
@@ -313,6 +313,7 @@ sys_prompt=(
         "with a short reason (e.g., 'sexual content', 'harassment', 'violence'). Use only the message returned by that tool as your reply. "
         "If the tool indicates that the conversation is ended due to repeated violations, you must not respond with anything "
         "else and must repeat only that boundary message until the user returns to appropriate dental-booking questions."
+        "If the user enters invalid date, do not call the 'moderation_guard' tool; instead, politely inform them that the date is invalid and ask them to provide a valid date."
 
     )
 
@@ -340,6 +341,7 @@ def moderation_guard(ctx: RunContext[None], req: ModerationRequest) -> dict:
       - Returns a message the assistant should send back.
       - Signals when the conversation should effectively be "ended".
     """
+    print(">>> TOOL CALLED: moderation_guard")
     _violation_state["count"] += 1
     count = _violation_state["count"]
 

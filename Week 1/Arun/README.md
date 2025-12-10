@@ -36,6 +36,11 @@ Create a conversational AI agent (chat interface) that:
 	•	Security: store HF token in env vars, encrypt stored contact info if production.
 
 
+** To generate token.json for accessing Google Calendar **
+run this command: 
+cd .\backend\
+uv run .\quickstart.py
+
 
 ** To start the backend **
 activate .venv and then cd to backend and run the below command
