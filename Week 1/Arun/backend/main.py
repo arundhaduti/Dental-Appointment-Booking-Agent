@@ -7,7 +7,7 @@ from typing import List, Optional, Dict, Any
 from app.rate_limit import rate_limiter
 import asyncio
 import uuid
-from backend.app.llm.agent import reset_violation_state
+from app.llm.agent import reset_violation_state
 
 
 # Week 1 agent and tools
