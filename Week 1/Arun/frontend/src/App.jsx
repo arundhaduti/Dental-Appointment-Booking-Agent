@@ -6,7 +6,7 @@ import remarkGfm from 'remark-gfm'
 const BOT_GREETING =
   'Hello - I am your dental appointment assistant. How can I help you?'
 
-const LOCK_MARKER = "[CONVERSATION_LOCKED]"
+const LOCK_MARKER = '[CONVERSATION_LOCKED]'
 
 // ---------- base styles ----------
 const basePageStyle = {
@@ -113,21 +113,25 @@ const inputRowStyle = {
   marginTop: 12,
 }
 
-const textInputStyle = (dark, locked) => ({
+const textInputStyle = (dark, locked, loading) => ({
   flex: 1,
   padding: '10px 12px',
   borderRadius: 999,
-  border: `1px solid ${dark ? '#4b5563' : '#d1d5db'}`,
+  border: `1px solid ${dark ? (loading ? '#374151' : '#4b5563') : (loading ? '#d1d5db' : '#d1d5db')}`,
   outline: 'none',
   fontSize: 14,
-  background: locked
-    ? (dark ? '#111827' : '#e5e7eb')
-    : (dark ? '#020617' : '#ffffff'),
+  background: locked ? (dark ? '#111827' : '#e5e7eb') : dark ? '#020617' : '#ffffff',
   color: dark ? '#e5e7eb' : '#111827',
   opacity: locked ? 0.6 : 1,
+  transition: 'border-color 120ms ease, box-shadow 120ms ease',
+  boxShadow: loading ? '0 0 0 3px rgba(37,99,235,0.06)' : 'none', // subtle glow while loading
 })
 
 const sendButtonStyle = (disabled) => ({
+  display: 'inline-flex',
+  alignItems: 'center',
+  justifyContent: 'center',
+  gap: 8,
   padding: '10px 18px',
   borderRadius: 999,
   border: 'none',
@@ -198,13 +202,11 @@ const bubbleStyle = (fromUser, dark) => ({
 
 // ---------- component ----------
 export default function App() {
-  const [messages, setMessages] = useState([
-    { from: 'agent', text: BOT_GREETING },
-  ])
+  const [messages, setMessages] = useState([{ from: 'agent', text: BOT_GREETING }])
   const [input, setInput] = useState('')
   const [loading, setLoading] = useState(false)
   const [darkMode, setDarkMode] = useState(false)
-  const [locked, setLocked] = useState(false)  // 🔒 NEW
+  const [locked, setLocked] = useState(false)
   const bottomRef = useRef(null)
 
   useEffect(() => {
@@ -212,6 +214,7 @@ export default function App() {
   }, [messages, loading, locked])
 
   const sendMessage = async () => {
+    // Prevent sending while agent is responding or conversation locked
     if (!input.trim() || loading || locked) return
 
     const userText = input.trim()
@@ -231,7 +234,7 @@ export default function App() {
       const data = await res.json()
       let reply = data.reply || data.error || 'No reply.'
 
-      // 🔒 Detect lock marker
+      // Detect lock marker
       if (reply.startsWith(LOCK_MARKER)) {
         setLocked(true)
         reply = reply.replace(LOCK_MARKER, '').trim()
@@ -240,10 +243,7 @@ export default function App() {
       const agentMsg = { from: 'agent', text: reply }
       setMessages((m) => [...m, agentMsg])
     } catch (err) {
-      setMessages((m) => [
-        ...m,
-        { from: 'agent', text: 'Error contacting server.' },
-      ])
+      setMessages((m) => [...m, { from: 'agent', text: 'Error contacting server.' }])
     } finally {
       setLoading(false)
     }
@@ -252,6 +252,7 @@ export default function App() {
   const handleKeyDown = (e) => {
     if (e.key === 'Enter') {
       e.preventDefault()
+      // Enter should attempt to send but obey loading/locked checks inside sendMessage
       sendMessage()
     }
   }
@@ -260,7 +261,7 @@ export default function App() {
     setMessages([{ from: 'agent', text: BOT_GREETING }])
     setInput('')
     setLoading(false)
-    setLocked(false)   // 🔓 unlock
+    setLocked(false)
 
     try {
       await fetch('http://localhost:8000/reset', { method: 'POST' })
@@ -269,38 +270,26 @@ export default function App() {
 
   const toggleDarkMode = () => setDarkMode((d) => !d)
 
+  // input remains editable while loading; only disabled when locked.
+  const inputDisabled = locked
+  const sendDisabled = loading || !input.trim() || locked
+
   return (
-    <div
-      className={darkMode ? 'app-root dark' : 'app-root'}
-      style={getPageStyle(darkMode)}
-    >
+    <div className={darkMode ? 'app-root dark' : 'app-root'} style={getPageStyle(darkMode)}>
       <div style={getCardStyle(darkMode)}>
         <header style={headerStyle}>
           <div>
             <h2 style={titleStyle}>Dental Appointment Assistant</h2>
-            <p
-              style={{
-                ...subtitleStyle,
-                color: darkMode ? '#9ca3af' : '#6b7280',
-              }}
-            >
+            <p style={{ ...subtitleStyle, color: darkMode ? '#9ca3af' : '#6b7280' }}>
               Chat with the assistant to schedule or adjust your dental visit.
             </p>
           </div>
           <div style={headerRightStyle}>
             <span style={chipStyle}>LLM-powered</span>
-            <button
-              type="button"
-              style={darkToggleStyle(darkMode)}
-              onClick={toggleDarkMode}
-            >
+            <button type="button" style={darkToggleStyle(darkMode)} onClick={toggleDarkMode}>
               {darkMode ? '☀ Light' : '🌙 Dark'}
             </button>
-            <button
-              type="button"
-              style={resetButtonStyle}
-              onClick={handleReset}
-            >
+            <button type="button" style={resetButtonStyle} onClick={handleReset}>
               ⟲ Start over
             </button>
           </div>
@@ -308,20 +297,17 @@ export default function App() {
 
         {/* 🔒 LOCKOUT BANNER */}
         {locked && (
-          <div
-            style={{
-              padding: '10px 14px',
-              marginBottom: 10,
-              borderRadius: 8,
-              background: '#fee2e2',
-              border: '1px solid #fecaca',
-              color: '#b91c1c',
-              fontSize: 14,
-              fontWeight: 500,
-            }}
-          >
-            Conversation locked due to repeated violations.  
-            Click **Start over** to begin a new session.
+          <div style={{
+            padding: '10px 14px',
+            marginBottom: 10,
+            borderRadius: 8,
+            background: '#fee2e2',
+            border: '1px solid #fecaca',
+            color: '#b91c1c',
+            fontSize: 14,
+            fontWeight: 500,
+          }}>
+            Conversation locked due to repeated violations. Click **Start over** to begin a new session.
           </div>
         )}
 
@@ -329,33 +315,15 @@ export default function App() {
           {messages.map((m, i) => (
             <div key={i} style={bubbleRowStyle(m.from === 'user')}>
               <div style={bubbleInnerRowStyle(m.from === 'user')}>
-                <div
-                  style={
-                    m.from === 'user'
-                      ? avatarUserStyle(darkMode)
-                      : avatarBotStyle(darkMode)
-                  }
-                >
+                <div style={m.from === 'user' ? avatarUserStyle(darkMode) : avatarBotStyle(darkMode)}>
                   {m.from === 'user' ? '🧑' : '🦷'}
                 </div>
-                <div
-                  className="bubble-enter"
-                  style={bubbleStyle(m.from === 'user', darkMode)}
-                >
-                  <ReactMarkdown
-                    remarkPlugins={[remarkGfm]}
-                    components={{
-                      p: (props) => (
-                        <p style={{ margin: '6px 0' }} {...props} />
-                      ),
-                      strong: (props) => (
-                        <strong style={{ fontWeight: 700 }} {...props} />
-                      ),
-                      li: (props) => (
-                        <li style={{ marginBottom: 4 }} {...props} />
-                      ),
-                    }}
-                  >
+                <div className="bubble-enter" style={bubbleStyle(m.from === 'user', darkMode)}>
+                  <ReactMarkdown remarkPlugins={[remarkGfm]} components={{
+                    p: (props) => <p style={{ margin: '6px 0' }} {...props} />,
+                    strong: (props) => <strong style={{ fontWeight: 700 }} {...props} />,
+                    li: (props) => <li style={{ marginBottom: 4 }} {...props} />,
+                  }}>
                     {m.text}
                   </ReactMarkdown>
                 </div>
@@ -384,17 +352,15 @@ export default function App() {
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={handleKeyDown}
-            placeholder={
-              locked ? "Conversation locked. Click Start over." : "Type your message..."
-            }
-            disabled={loading || locked}
-            style={textInputStyle(darkMode, locked)}
+            placeholder={locked ? 'Conversation locked. Click Start over.' : 'Type your message...'}
+            disabled={inputDisabled}
+            style={textInputStyle(darkMode, locked, loading)}
           />
           <button
             type="button"
             onClick={sendMessage}
-            disabled={loading || !input.trim() || locked}
-            style={sendButtonStyle(loading || !input.trim() || locked)}
+            disabled={sendDisabled}
+            style={sendButtonStyle(sendDisabled)}
           >
             {locked ? 'Locked' : loading ? '...' : 'Send'}
           </button>

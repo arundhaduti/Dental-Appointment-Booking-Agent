@@ -4,7 +4,7 @@ import os
 import re
 import uuid
 from datetime import datetime, timezone, timedelta
-from typing import Any, Dict, Tuple
+from typing import Any, Dict, Tuple, Optional
 
 from dateutil import parser
 from dotenv import load_dotenv
@@ -31,7 +31,6 @@ from app.google_calendar import (
 #  ------------------------------------------------------
 #   To measure tokens
 #  ------------------------------------------------------
-
 def count_tokens(text: str, model: str = "gpt-4") -> int:
     encoding = tiktoken.encoding_for_model(model)
     return len(encoding.encode(text))
@@ -40,14 +39,13 @@ def count_tokens(text: str, model: str = "gpt-4") -> int:
 # ---------------------------------------------------------
 #  Timezone setup
 # ---------------------------------------------------------
-
 try:
     from zoneinfo import ZoneInfo
     KOLKATA = ZoneInfo("Asia/Kolkata")
 except Exception:
     KOLKATA = timezone(timedelta(hours=5, minutes=30))
 
-# Today's date in IST, used for both tools and prompt anchoring
+# Today's date in IST, used for prompt anchoring
 TODAY_IST = datetime.now(KOLKATA)
 TODAY_IST_STR = TODAY_IST.strftime("%d-%m-%Y")
 TODAY_IST_VERBOSE = TODAY_IST.strftime("%d %B %Y")
@@ -56,7 +54,6 @@ TODAY_IST_VERBOSE = TODAY_IST.strftime("%d %B %Y")
 # ---------------------------------------------------------
 #  Clinic working hours (IST)
 # ---------------------------------------------------------
-
 CLINIC_OPEN_HOUR = 9    # 9:00
 CLINIC_LUNCH_START = 13 # 13:00 (1 PM)
 CLINIC_LUNCH_END = 14   # 14:00 (2 PM)
@@ -81,8 +78,6 @@ def is_within_working_hours(dt: datetime) -> bool:
     return True
 
 
-
-
 def _normalize_input(s: str) -> str:
     s = (s or "").strip().lower()
     s = re.sub(r"(\d+)(st|nd|rd|th)\b", r"\1", s)
@@ -91,9 +86,8 @@ def _normalize_input(s: str) -> str:
 
 
 # ---------------------------------------------------------
-#  Tracks how many times the user sent inappropriate content in this conversation
+#  Tracks how many times the user sent inappropriate content
 # ---------------------------------------------------------
-
 _violation_state: Dict[str, int] = {"count": 0}
 
 
@@ -105,11 +99,65 @@ def reset_violation_state() -> None:
     _violation_state["count"] = 0
 
 
+# ---------------------------------------------------------
+# Natural date resolver (fallback safety net)
+# ---------------------------------------------------------
+WEEKDAYS = {
+    "monday": 0, "tuesday": 1, "wednesday": 2, "thursday": 3,
+    "friday": 4, "saturday": 5, "sunday": 6
+}
+
+
+def resolve_natural_date_phrase(s: str, now: datetime) -> Optional[datetime]:
+    """
+    Resolve simple natural-language date phrases into a datetime (same time-of-day as 'now')
+    Returns a datetime or None if it cannot resolve.
+
+    Handles:
+      - today
+      - tomorrow
+      - day after tomorrow
+      - in N days
+      - next <weekday>
+      - weekday names (upcoming)
+    """
+    if not s:
+        return None
+    s = s.strip().lower()
+
+    if s == "today":
+        return now
+    if s == "tomorrow":
+        return now + timedelta(days=1)
+    if s in ("day after tomorrow", "day after", "dayaftertomorrow"):
+        return now + timedelta(days=2)
+
+    m = re.search(r"\bin\s+(\d{1,3})\s+days?\b", s)
+    if m:
+        days = int(m.group(1))
+        return now + timedelta(days=days)
+
+    m2 = re.search(r"\bnext\s+(monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b", s)
+    if m2:
+        weekday = WEEKDAYS[m2.group(1)]
+        days_ahead = (weekday - now.weekday() + 7) % 7
+        days_ahead = days_ahead if days_ahead != 0 else 7
+        return now + timedelta(days=days_ahead)
+
+    m3 = re.search(r"\b(monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b", s)
+    if m3:
+        weekday = WEEKDAYS[m3.group(1)]
+        days_ahead = (weekday - now.weekday() + 7) % 7
+        if days_ahead == 0:
+            days_ahead = 7
+        return now + timedelta(days=days_ahead)
+
+    return None
+
 
 # ---------------------------------------------------------
 #  Models
 # ---------------------------------------------------------
-
 class Appointment(BaseModel):
     """
     Booking schema used by the LLM and FastAPI.
@@ -124,9 +172,19 @@ class Appointment(BaseModel):
     @field_validator("preferred_date")
     @classmethod
     def validate_preferred_date(cls, v: str) -> str:
-        # Always interpret relative dates like 'tomorrow' in IST
+        # Always interpret relative dates like 'tomorrow' in IST with helper, else parse.
         now = datetime.now(KOLKATA)
         s = _normalize_input(v)
+
+        # 1) Try resolver (handles 'tomorrow', 'in 3 days', weekdays, etc.)
+        resolved = resolve_natural_date_phrase(s, now)
+        if resolved is not None:
+            # enforce appointments must be after today
+            if resolved.date() <= now.date():
+                raise ValueError("Appointment date must be after today's date.")
+            return resolved.strftime("%d-%m-%Y")
+
+        # 2) Fallback to parser.parse
         try:
             dt = parser.parse(s, dayfirst=True, fuzzy=True)
         except Exception as e:
@@ -137,8 +195,10 @@ class Appointment(BaseModel):
             candidate = candidate.replace(year=now.year + 1)
         dt = candidate
 
-        return dt.strftime("%d-%m-%Y")
+        if dt.date() <= now.date():
+            raise ValueError("Appointment date must be after today's date.")
 
+        return dt.strftime("%d-%m-%Y")
 
     @field_validator("time")
     @classmethod
@@ -190,6 +250,14 @@ class RescheduleRequest(BaseModel):
         now = datetime.now(KOLKATA)
         s = _normalize_input(v)
 
+        # Try natural resolver first
+        resolved = resolve_natural_date_phrase(s, now)
+        if resolved is not None:
+            if resolved.date() <= now.date():
+                raise ValueError("New appointment date must be after today's date.")
+            return resolved.strftime("%d-%m-%Y")
+
+        # Fallback to parser.parse
         try:
             dt = parser.parse(s, dayfirst=True, fuzzy=True)
         except Exception as e:
@@ -204,7 +272,6 @@ class RescheduleRequest(BaseModel):
             raise ValueError("New appointment date must be after today's date.")
 
         return dt.strftime("%d-%m-%Y")
-
 
     @field_validator("new_time")
     @classmethod
@@ -240,18 +307,15 @@ class ModerationRequest(BaseModel):
     reason: str = Field(..., description="Why the message is inappropriate (e.g. 'sexual content', 'harassment').")
 
 
-
 # ---------------------------------------------------------
 #  Global details for /appointment endpoint
 # ---------------------------------------------------------
-
 appointmentDetails: Dict[str, Any] = {}
 
 
 # ---------------------------------------------------------
 #  Date/time helpers
 # ---------------------------------------------------------
-
 def parse_date_time(date_str: str, time_str: str) -> Tuple[datetime, datetime]:
     """
     Parse date + time strings into a timezone-aware datetime range in IST.
@@ -279,7 +343,6 @@ def _parse_appointment_to_datetimes(appointment: Appointment) -> Tuple[datetime,
 # ---------------------------------------------------------
 #  Agent setup
 # ---------------------------------------------------------
-
 load_dotenv()
 
 openrouter_provider = OpenAIProvider(
@@ -289,33 +352,35 @@ openrouter_provider = OpenAIProvider(
 
 model = OpenAIChatModel("kwaipilot/kat-coder-pro:free", provider=openrouter_provider)
 
-sys_prompt=(
-        "You are a friendly, concise dental assistant. Ask only one piece of information at a time "
-        "(e.g., name → email → date → time → service); never list all questions. Keep replies short, "
-        "polite and natural. Do NOT assume any information.\n\n"
-        f"Today is {TODAY_IST_VERBOSE} in Asia/Kolkata. Interpret relative phrases (e.g. 'today', 'tomorrow', "
-        "'day after tomorrow', 'next Monday') relative to this date.\n\n"
-        "IMPORTANT: Do NOT convert natural-language date phrases to absolute dates yourself. Pass date phrases "
-        "AS-IS into tools (preferred_date / new_preferred_date); tools will normalize.\n\n"
-        "If the user wants to BOOK, call dental_booking_agent with collected details. If that tool returns "
-        "'unavailable' with alternatives, present those suggested slots and ask the user to pick one; do NOT "
-        "ask the user to invent new dates/times.\n"
-        "If the user wants to RESCHEDULE, call reschedule_appointment using their email to find the booking.\n"
-        "Clinic hours (IST): 9:00-13:00 and 14:00-18:00. Do NOT suggest or book outside these hours or during "
-        "lunch (13:00-14:00). If asked for an outside time, explain the hours and offer valid times.\n"
-        "If the user wants to CANCEL, call cancel_appointment with their email. To VIEW/CHECK an appointment, call "
-        "get_appointment_details with their email.\n"
-        "Never claim an appointment is booked, rescheduled, cancelled, or retrieved unless the corresponding tool "
-        "returns success. If the user says 'yes', infer intent from context. Restrict to dental booking topics; "
-        "politely refuse unrelated requests. After successful booking/rescheduling, confirm with a summary."
-        "If a user message contains sexual content, harassment, abusive language, explicit or inappropriate statements, or "
-        "violent or hateful speech, you must not answer it or call any booking tools. Instead, call the `moderation_guard` tool "
-        "with a short reason (e.g., 'sexual content', 'harassment', 'violence'). Use only the message returned by that tool as your reply. "
-        "If the tool indicates that the conversation is ended due to repeated violations, you must not respond with anything "
-        "else and must repeat only that boundary message until the user returns to appropriate dental-booking questions."
-        "If the user enters invalid date, do not call the 'moderation_guard' tool; instead, politely inform them that the date is invalid and ask them to provide a valid date."
-
-    )
+# System prompt: NOTE we now require the LLM to convert relative dates into DD-MM-YYYY before calling tools.
+sys_prompt = (
+    "You are a friendly, concise dental assistant. Ask only one piece of information at a time "
+    "(e.g., name → email → phone → date → time → service); NEVER list all questions at once. Keep replies short, "
+    "polite and natural. Do NOT assume any information.\n\n"
+    f"Today is {TODAY_IST_VERBOSE} in Asia/Kolkata. "
+    "IMPORTANT: When the user gives a relative or natural-language date (e.g. 'today', 'tomorrow', "
+    "'day after tomorrow', 'in 3 days', 'next Monday', 'Monday'), you MUST convert it to an explicit "
+    "DD-MM-YYYY value (Asia/Kolkata) before calling any tool that accepts a date (preferred_date or new_preferred_date). "
+    f"Examples using today = {TODAY_IST_STR}: 'today' -> '{TODAY_IST_STR}'; 'tomorrow' -> (tomorrow's DD-MM-YYYY); "
+    "'day after tomorrow' -> (DD-MM-YYYY for +2 days). Always use the explicit DD-MM-YYYY string in tool call payloads and in user confirmations.\n\n"
+    "If the user wants to BOOK, call dental_booking_agent with collected details. If that tool returns "
+    "'unavailable' with alternatives, present those suggested slots and ask the user to pick one; do NOT "
+    "ask the user to invent new dates/times.\n"
+    "If the user wants to RESCHEDULE, call reschedule_appointment using their email to find the booking.\n"
+    "Clinic hours (IST): 9:00-13:00 and 14:00-18:00. Do NOT suggest or book outside these hours or during "
+    "lunch (13:00-14:00). If asked for an outside time, explain the hours and offer valid times.\n"
+    "If the user wants to CANCEL, call cancel_appointment with their email. To VIEW/CHECK an appointment, call "
+    "get_appointment_details with their email.\n"
+    "Never claim an appointment is booked, rescheduled, cancelled, or retrieved unless the corresponding tool "
+    "returns success. If the user says 'yes', infer intent from context. Restrict to dental booking topics; "
+    "politely refuse unrelated requests. After successful booking/rescheduling, confirm with a summary.\n\n"
+    "If a user message contains sexual content, harassment, abusive language, explicit or inappropriate statements, or "
+    "violent or hateful speech, you must not answer it or call any booking tools. Instead, call the `moderation_guard` tool "
+    "with a short reason (e.g., 'sexual content', 'harassment', 'violence'). Use only the message returned by that tool as your reply. "
+    "If the tool indicates that the conversation is ended due to repeated violations, you must not respond with anything "
+    "else and must repeat only that boundary message until the user returns to appropriate dental-booking questions.\n"
+    "If the user enters an invalid date, do not call the 'moderation_guard' tool; instead, politely inform them that the date is invalid and ask them to provide a valid date."
+)
 
 agent = Agent(
     model=model,
@@ -327,10 +392,10 @@ agent = Agent(
 old_prompt_tokens = count_tokens(sys_prompt)
 print(f"Current token usage is: {old_prompt_tokens} tokens per request")
 
-# ---------------------------------------------------------
-#  Tool: Book appointment (Pinecone + Google Calendar)
-# ---------------------------------------------------------
 
+# ---------------------------------------------------------
+#  Tool: moderation_guard
+# ---------------------------------------------------------
 @agent.tool
 def moderation_guard(ctx: RunContext[None], req: ModerationRequest) -> dict:
     """
@@ -382,7 +447,9 @@ def moderation_guard(ctx: RunContext[None], req: ModerationRequest) -> dict:
     }
 
 
-
+# ---------------------------------------------------------
+#  Tool: Book appointment (Pinecone + Google Calendar)
+# ---------------------------------------------------------
 @agent.tool
 def dental_booking_agent(ctx: RunContext[None], appointment: Appointment) -> dict:
     """
@@ -395,6 +462,8 @@ def dental_booking_agent(ctx: RunContext[None], appointment: Appointment) -> dic
     - Updates appointmentDetails (in-memory).
     """
     print(">>> TOOL CALLED: dental_booking_agent")
+    # DEBUG: show exactly what the LLM passed to the tool
+    print("TOOL INPUT:", appointment.preferred_date, appointment.time)
     try:
         # 1) Parse to datetimes
         start_dt, end_dt = _parse_appointment_to_datetimes(appointment)
@@ -402,7 +471,7 @@ def dental_booking_agent(ctx: RunContext[None], appointment: Appointment) -> dic
         patient_name = appointment.name
         reason = appointment.reason or "Dental appointment"
 
-                # 1.5) Enforce clinic working hours
+        # 1.5) Enforce clinic working hours
         if not (is_within_working_hours(start_dt) and is_within_working_hours(end_dt)):
             hours_msg = (
                 "Our clinic operates from 9:00 AM to 1:00 PM and from 2:00 PM to 6:00 PM, "
@@ -416,14 +485,13 @@ def dental_booking_agent(ctx: RunContext[None], appointment: Appointment) -> dic
             )
             return {"status": "outside_hours", "message": msg}
 
-
         # Build a user_id for persistence (prefer email)
         if appointment.contact_email:
             user_id = appointment.contact_email
         else:
             user_id = f"user:{patient_name}:{appointment.contact_phone}"
 
-                # 2) Check Google Calendar slot
+        # 2) Check Google Calendar slot
         if not is_slot_free(start_dt, end_dt):
             # Find nearby alternative slots
             alternatives = find_alternative_slots(start_dt, duration_minutes=30, max_suggestions=4)
@@ -469,7 +537,6 @@ def dental_booking_agent(ctx: RunContext[None], appointment: Appointment) -> dic
                 "Would you like to try a different date?"
             )
             return {"status": "unavailable", "message": msg}
-
 
         # 3) Create StoredAppointment for persistence
         stored = StoredAppointment(
@@ -536,16 +603,10 @@ def dental_booking_agent(ctx: RunContext[None], appointment: Appointment) -> dic
 # ---------------------------------------------------------
 #  Tool: Reschedule appointment
 # ---------------------------------------------------------
-
 @agent.tool
 def reschedule_appointment(ctx: RunContext[None], req: RescheduleRequest) -> dict:
     """
     Reschedules the user's latest upcoming confirmed appointment to a new date/time.
-
-    - Finds the nearest upcoming confirmed appointment for the given email.
-    - Moves the Google Calendar event (update, not create).
-    - Updates the existing record in Pinecone (same id).
-    - Returns a human-friendly confirmation message.
     """
     print(">>> TOOL CALLED: reschedule_appointment")
     try:
@@ -562,11 +623,11 @@ def reschedule_appointment(ctx: RunContext[None], req: RescheduleRequest) -> dic
                 ),
             }
 
-        # 2) Parse new datetimes directly (no Appointment model, so no phone required)
+        # 2) Parse new datetimes directly
         new_start, new_end = parse_date_time(req.new_preferred_date, req.new_time)
         old_start = existing.start_time
 
-                # 2.5) Enforce clinic working hours for reschedule
+        # 2.5) Enforce clinic working hours for reschedule
         if not (is_within_working_hours(new_start) and is_within_working_hours(new_end)):
             hours_msg = (
                 "Our clinic operates from 9:00 AM to 1:00 PM and from 2:00 PM to 6:00 PM, "
@@ -578,7 +639,6 @@ def reschedule_appointment(ctx: RunContext[None], req: RescheduleRequest) -> dic
                 "Please choose a time within these hours."
             )
             return {"status": "outside_hours", "message": msg}
-
 
         # 3) Update the existing appointment object
         existing.start_time = new_start
@@ -625,18 +685,15 @@ def reschedule_appointment(ctx: RunContext[None], req: RescheduleRequest) -> dic
             "status": "error",
             "message": f"Sorry, I couldn't reschedule your appointment due to an internal error: {e}",
         }
-    
 
 
+# ---------------------------------------------------------
+#  Tool: Cancel appointment
+# ---------------------------------------------------------
 @agent.tool
 def cancel_appointment(ctx: RunContext[None], req: CancelRequest) -> dict:
     """
     Cancels the user's nearest upcoming confirmed appointment.
-
-    - Finds the nearest upcoming confirmed appointment for the given email.
-    - Deletes the corresponding Google Calendar event (if any).
-    - Marks the appointment as 'cancelled' in Pinecone (same id, not removed).
-    - Updates in-memory appointmentDetails.
     """
     print(">>> TOOL CALLED: cancel_appointment")
     try:
@@ -690,15 +747,13 @@ def cancel_appointment(ctx: RunContext[None], req: CancelRequest) -> dict:
         }
 
 
+# ---------------------------------------------------------
+#  Tool: Get appointment details
+# ---------------------------------------------------------
 @agent.tool
 def get_appointment_details(ctx: RunContext[None], req: GetAppointmentRequest) -> dict:
     """
     Returns the nearest upcoming confirmed appointment for this email, if any.
-
-    Used by the LLM when the user asks things like:
-    - "What is my appointment?"
-    - "Do I have anything booked?"
-    - "When is my next appointment?"
     """
     print(">>> TOOL CALLED: get_appointment_details")
     try:
@@ -766,11 +821,9 @@ def get_appointment_details(ctx: RunContext[None], req: GetAppointmentRequest) -
         }
 
 
-
 # ---------------------------------------------------------
 #  Tool: Slot checker (calendar-based, matches main.py)
 # ---------------------------------------------------------
-
 @agent.tool_plain
 def check_appointment_slot_available(appointment: Appointment) -> str:
     """
@@ -796,7 +849,6 @@ def check_appointment_slot_available(appointment: Appointment) -> str:
 # ---------------------------------------------------------
 #  CLI chat loop (optional)
 # ---------------------------------------------------------
-
 if __name__ == "__main__":
     print(" hey, how can I help you? ")
     exit_conditions = (":q", "quit", "exit", "bye")
