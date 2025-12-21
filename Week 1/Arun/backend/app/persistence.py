@@ -3,11 +3,26 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
-from typing import List, Optional
+from typing import List, Optional, Dict
 
 from .pinecone_client import index  # assumes you already have this
 from .models import UserProfile, StoredAppointment
 
+
+# -------------------------------
+# Pinecone metadata safety helper
+# -------------------------------
+
+def _clean_metadata(md: Dict) -> Dict:
+    """
+    Pinecone does not allow null values.
+    Remove keys where value is None or empty.
+    """
+    return {
+        k: v
+        for k, v in md.items()
+        if v is not None and v != []
+    }
 
 
 IST = timezone(timedelta(hours=5, minutes=30))
@@ -27,18 +42,19 @@ def save_user(user: UserProfile) -> None:
     """
     Store user profile in Pinecone under namespace 'users'.
     """
-    index.upsert(
-        vectors=[
-            (
-                f"user-{user.user_id}",
-                DUMMY_VECTOR,
-                {
+    cleaned = _clean_metadata({
                     "type": "user",
                     "user_id": user.user_id,
                     "name": user.name,
                     "email": user.email,
                     "phone": user.phone or "",
-                },
+                })
+    index.upsert(
+        vectors=[
+            (
+                f"user-{user.user_id}",
+                DUMMY_VECTOR,
+                cleaned,
             )
         ],
         namespace="users",

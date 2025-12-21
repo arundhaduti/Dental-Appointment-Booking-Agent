@@ -12,6 +12,10 @@ from pydantic import BaseModel, Field, field_validator, EmailStr
 from pydantic_ai import Agent, RunContext
 from pydantic_ai.models.openai import OpenAIChatModel
 from pydantic_ai.providers.openai import OpenAIProvider
+from datetime import datetime
+from app.models import UserMemory
+from app.user_memory import save_user_memory
+
 
 from app.models import StoredAppointment, UserProfile
 from app.persistence import (
@@ -380,6 +384,7 @@ sys_prompt = (
     "If the tool indicates that the conversation is ended due to repeated violations, you must not respond with anything "
     "else and must repeat only that boundary message until the user returns to appropriate dental-booking questions.\n"
     "If the user enters an invalid date, do not call the 'moderation_guard' tool; instead, politely inform them that the date is invalid and ask them to provide a valid date."
+    "Only store user information when the user explicitly states a preference or personal detail; never infer, guess, or store medical or sensitive information."
 )
 
 agent = Agent(
@@ -844,6 +849,29 @@ def check_appointment_slot_available(appointment: Appointment) -> str:
             )
     except Exception as e:
         return f"Sorry, I couldn't check the slot due to an internal error: {e}"
+    
+
+# ---------------------------------------------------------
+#  Tool: Remember user preference
+# ---------------------------------------------------------
+@agent.tool
+def remember_user_preference(ctx: RunContext[None], memory: UserMemory) -> dict:
+    """
+    Explicit memory write tool.
+
+    This tool MUST ONLY be called when the user clearly and voluntarily
+    states a preference or personal detail.
+    """
+    print(">>> TOOL CALLED: remember_user_preference")
+
+    memory.last_updated = datetime.utcnow()
+    save_user_memory(memory)
+
+    return {
+        "status": "stored",
+        "message": "Got it — I’ll remember that for next time."
+    }
+
 
 
 # ---------------------------------------------------------
