@@ -4,7 +4,7 @@ import os
 import re
 import uuid
 from datetime import datetime, timezone, timedelta
-from typing import Any, Dict, Tuple, Optional
+from typing import Any, Dict, Tuple, Optional, List
 
 from dateutil import parser
 from dotenv import load_dotenv
@@ -13,8 +13,6 @@ from pydantic_ai import Agent, RunContext
 from pydantic_ai.models.openai import OpenAIChatModel
 from pydantic_ai.providers.openai import OpenAIProvider
 from datetime import datetime
-from app.models import UserMemory
-from app.user_memory import save_user_memory
 
 
 from app.models import StoredAppointment, UserProfile
@@ -172,6 +170,20 @@ class Appointment(BaseModel):
     reason: str = Field(..., description="Reason for visit, e.g., Cleaning, Check-up, etc.")
     contact_email: EmailStr = Field(..., description="Email address used for booking")
     contact_phone: str = Field(..., description="10 digit phone number")
+
+    # Preferences (explicit statements only)
+    preferred_times: List[str] = Field(default_factory=list)
+    preferred_dentist: Optional[str] = None
+    insurance_provider: Optional[str] = None
+
+    # Comfort & communication preferences
+    dental_anxiety: Optional[bool] = None
+    prefers_brief_responses: Optional[bool] = None
+    prefers_emojis: Optional[bool] = None
+    tone: Optional[str] = None  # 'formal' | 'friendly'
+
+    # Metadata
+    last_updated: datetime = Field(default_factory=lambda: datetime.now(KOLKATA))
 
     @field_validator("preferred_date")
     @classmethod
@@ -360,7 +372,11 @@ model = OpenAIChatModel("kwaipilot/kat-coder-pro:free", provider=openrouter_prov
 sys_prompt = (
     "You are a friendly, concise dental assistant. Ask only one piece of information at a time "
     "(e.g., name → email → phone → date → time → service); NEVER list all questions at once. Keep replies short, "
-    "polite and natural. Do NOT assume any information.\n\n"
+    "polite and natural. Do NOT assume any information.\n"
+    "When the user explicitly states a preference or personal detail (for example: “I prefer evening appointments”, “I like brief responses”, “I'm anxious about dental visits”),"
+    "you MUST populate the corresponding preference fields in the Appointment object (preferred_times, dental_anxiety, prefers_brief_responses, prefers_emojis, tone, etc.)"
+    "while continuing the current booking or scheduling flow. Do NOT pause the flow, do NOT ask for confirmation to store preferences, and do NOT mention memory or saving. Only store preferences that the user states explicitly."
+    "ALWAYS look for such preferences in every user message and update the Appointment object accordingly.\n"
     f"Today is {TODAY_IST_VERBOSE} in Asia/Kolkata. "
     "IMPORTANT: When the user gives a relative or natural-language date (e.g. 'today', 'tomorrow', "
     "'day after tomorrow', 'in 3 days', 'next Monday', 'Monday'), you MUST convert it to an explicit "
@@ -378,13 +394,14 @@ sys_prompt = (
     "Never claim an appointment is booked, rescheduled, cancelled, or retrieved unless the corresponding tool "
     "returns success. If the user says 'yes', infer intent from context. Restrict to dental booking topics; "
     "politely refuse unrelated requests. After successful booking/rescheduling, confirm with a summary.\n\n"
+    "After a booking is confirmed, if the user mentions a new preference (e.g., dental anxiety, tone, emoji usage, preferred dentist, preferred times), update preferences only using update_user_preferences."
+    "Do not check availability or modify the appointment unless the user explicitly asks to change the date or time."
     "If a user message contains sexual content, harassment, abusive language, explicit or inappropriate statements, or "
     "violent or hateful speech, you must not answer it or call any booking tools. Instead, call the `moderation_guard` tool "
     "with a short reason (e.g., 'sexual content', 'harassment', 'violence'). Use only the message returned by that tool as your reply. "
     "If the tool indicates that the conversation is ended due to repeated violations, you must not respond with anything "
     "else and must repeat only that boundary message until the user returns to appropriate dental-booking questions.\n"
     "If the user enters an invalid date, do not call the 'moderation_guard' tool; instead, politely inform them that the date is invalid and ask them to provide a valid date."
-    "Only store user information when the user explicitly states a preference or personal detail; never infer, guess, or store medical or sensitive information."
 )
 
 agent = Agent(
@@ -450,6 +467,8 @@ def moderation_guard(ctx: RunContext[None], req: ModerationRequest) -> dict:
         "end_conversation": end_conversation,
         "reason": req.reason,
     }
+
+
 
 
 # ---------------------------------------------------------
@@ -566,7 +585,17 @@ def dental_booking_agent(ctx: RunContext[None], appointment: Appointment) -> dic
                 email=appointment.contact_email,
                 phone=appointment.contact_phone,
             )
-            save_user(profile)
+            save_user(profile,
+                    preferences={
+                        "preferred_times": appointment.preferred_times,
+                        "preferred_dentist": appointment.preferred_dentist,
+                        "insurance_provider": appointment.insurance_provider,
+                        "dental_anxiety": appointment.dental_anxiety,
+                        "prefers_brief_responses": appointment.prefers_brief_responses,
+                        "prefers_emojis": appointment.prefers_emojis,
+                        "tone": appointment.tone,
+                        "last_updated": appointment.last_updated.isoformat(),
+    })
 
         # 6) Save appointment to Pinecone
         save_stored_appointment(stored)
@@ -851,26 +880,41 @@ def check_appointment_slot_available(appointment: Appointment) -> str:
         return f"Sorry, I couldn't check the slot due to an internal error: {e}"
     
 
-# ---------------------------------------------------------
-#  Tool: Remember user preference
-# ---------------------------------------------------------
+
 @agent.tool
-def remember_user_preference(ctx: RunContext[None], memory: UserMemory) -> dict:
+def update_user_preferences(ctx: RunContext[None], profile: UserProfile) -> dict:
     """
-    Explicit memory write tool.
-
-    This tool MUST ONLY be called when the user clearly and voluntarily
-    states a preference or personal detail.
+    Update existing user profile preferences without touching the booking.
+    NEVER triggers slot changes or calendar updates.
     """
-    print(">>> TOOL CALLED: remember_user_preference")
+    try:
+        save_user(
+            profile,
+            preferences={
+                "preferred_times": profile.preferred_times,
+                "preferred_dentist": profile.preferred_dentist,
+                "insurance_provider": profile.insurance_provider,
+                "dental_anxiety": profile.dental_anxiety,
+                "prefers_brief_responses": profile.prefers_brief_responses,
+                "prefers_emojis": profile.prefers_emojis,
+                "tone": profile.tone,
+                "last_updated": datetime.now(KOLKATA).isoformat(),
+            },
+        )
 
-    memory.last_updated = datetime.utcnow()
-    save_user_memory(memory)
+        print(">>> User preferences tool called.")
 
-    return {
-        "status": "stored",
-        "message": "Got it — I’ll remember that for next time."
-    }
+        return {
+            "status": "updated",
+            "message": "Thanks! I’ve updated your preferences."
+        }
+
+    except Exception as e:
+        return {
+            "status": "error",
+            "message": f"Preference update failed: {e}"
+        }
+
 
 
 

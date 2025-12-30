@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 from typing import List, Optional, Dict
 
-from .pinecone_client import index  # assumes you already have this
+from .pinecone_client import index
 from .models import UserProfile, StoredAppointment
 
 
@@ -30,25 +30,33 @@ IST = timezone(timedelta(hours=5, minutes=30))
 # Keep this consistent with your index dimension
 DUMMY_VECTOR_DIM = 64
 
-# Pinecone requires at least one non-zero value in dense vectors.
-# We don't care about actual similarity here (we use metadata filters),
-# so we just make the first dimension 1.0 and the rest 0.0.
 DUMMY_VECTOR = [0.0] * DUMMY_VECTOR_DIM
 DUMMY_VECTOR[0] = 1.0
 
 
+# -------------------------------------------------
+#  USER PROFILE + PREFERENCES
+# -------------------------------------------------
 
-def save_user(user: UserProfile) -> None:
+def save_user(user: UserProfile, preferences: Optional[Dict] = None) -> None:
     """
-    Store user profile in Pinecone under namespace 'users'.
+    Store or update user profile + preferences in Pinecone under namespace 'users'.
+
+    Preferences must already be validated and optional.
     """
-    cleaned = _clean_metadata({
-                    "type": "user",
-                    "user_id": user.user_id,
-                    "name": user.name,
-                    "email": user.email,
-                    "phone": user.phone or "",
-                })
+    metadata = {
+        "type": "user",
+        "user_id": user.user_id,
+        "name": user.name,
+        "email": user.email,
+        "phone": user.phone,
+    }
+
+    if preferences:
+        metadata.update(preferences)
+
+    cleaned = _clean_metadata(metadata)
+
     index.upsert(
         vectors=[
             (
@@ -61,30 +69,35 @@ def save_user(user: UserProfile) -> None:
     )
 
 
+# -------------------------------------------------
+#  APPOINTMENTS
+# -------------------------------------------------
+
 def save_stored_appointment(appt: StoredAppointment) -> None:
     """
     Store StoredAppointment in Pinecone under namespace 'appointments'.
-    All structured data goes into metadata.
     """
     if not appt.id:
         raise ValueError("StoredAppointment.id must be set before saving")
+
+    metadata = _clean_metadata({
+        "type": "appointment",
+        "id": appt.id,
+        "user_id": appt.user_id,
+        "patient_name": appt.patient_name,
+        "reason": appt.reason,
+        "start_time": appt.start_time.isoformat(),
+        "end_time": appt.end_time.isoformat(),
+        "google_event_id": appt.google_event_id,
+        "status": appt.status,
+    })
 
     index.upsert(
         vectors=[
             (
                 f"appt-{appt.id}",
                 DUMMY_VECTOR,
-                {
-                    "type": "appointment",
-                    "id": appt.id,
-                    "user_id": appt.user_id,
-                    "patient_name": appt.patient_name,
-                    "reason": appt.reason,
-                    "start_time": appt.start_time.isoformat(),
-                    "end_time": appt.end_time.isoformat(),
-                    "google_event_id": appt.google_event_id or "",
-                    "status": appt.status,
-                },
+                metadata,
             )
         ],
         namespace="appointments",
@@ -92,9 +105,6 @@ def save_stored_appointment(appt: StoredAppointment) -> None:
 
 
 def _stored_appointment_from_metadata(md: dict) -> StoredAppointment:
-    """
-    Helper: convert Pinecone metadata back into a StoredAppointment model.
-    """
     return StoredAppointment(
         id=md["id"],
         user_id=md["user_id"],
@@ -102,22 +112,15 @@ def _stored_appointment_from_metadata(md: dict) -> StoredAppointment:
         reason=md.get("reason", ""),
         start_time=datetime.fromisoformat(md["start_time"]),
         end_time=datetime.fromisoformat(md["end_time"]),
-        google_event_id=md.get("google_event_id") or None,
+        google_event_id=md.get("google_event_id"),
         status=md.get("status", "confirmed"),
     )
 
 
-def get_appointments_for_user(user_id: str, limit: int = 50) -> List[StoredAppointment]:
-    """
-    Option C: Use Pinecone metadata filtering + namespace search.
-
-    We query the 'appointments' namespace with:
-      - a dummy vector (because Pinecone requires a vector)
-      - a metadata filter on user_id
-      - include_metadata=True so we can reconstruct StoredAppointment models
-
-    'limit' is the max number of appointments to return for this user.
-    """
+def get_appointments_for_user(
+    user_id: str,
+    limit: int = 50
+) -> List[StoredAppointment]:
     result = index.query(
         namespace="appointments",
         vector=DUMMY_VECTOR,
@@ -136,25 +139,21 @@ def get_appointments_for_user(user_id: str, limit: int = 50) -> List[StoredAppoi
             continue
         appointments.append(_stored_appointment_from_metadata(md))
 
-    # Sort by start time ascending before returning
     appointments.sort(key=lambda a: a.start_time)
-
     return appointments
 
-def get_latest_confirmed_future_appointment(user_id: str, limit: int = 50) -> Optional[StoredAppointment]:
-    """
-    Return the nearest upcoming confirmed appointment for this user, if any.
-    This is what we'll reschedule instead of creating a new one.
-    """
-    # Reuse your existing getter if you have it:
-    appointments: List[StoredAppointment] = get_appointments_for_user(user_id, limit=limit)
+
+def get_latest_confirmed_future_appointment(
+    user_id: str,
+    limit: int = 50
+) -> Optional[StoredAppointment]:
+    appointments = get_appointments_for_user(user_id, limit=limit)
 
     now = datetime.now(IST)
     future = [
         a for a in appointments
-        if a.status == "confirmed" and a.start_time >= now  # adjust field names if needed
+        if a.status == "confirmed" and a.start_time >= now
     ]
-    # sort by start time so [0] is the soonest upcoming
-    future.sort(key=lambda a: a.start_time)
 
+    future.sort(key=lambda a: a.start_time)
     return future[0] if future else None

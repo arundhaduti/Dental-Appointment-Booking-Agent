@@ -308,3 +308,57 @@ Ensure vectors are non‑zero and match index dimensions.
 Use synchronous `agent.run_sync()` instead of thread wrappers.
 
 ---
+
+
+# 🗂️ User Information Storage & Personalization
+
+## 🎯 Objective
+Enable the Dental Appointment Agent to maintain memory of user-specific details so the conversation becomes more natural, consistent, and personalized across sessions.
+
+## 🔧 Features Added This Week
+1. Persistent user profile storage  
+2. Preference-based personalization  
+3. Appointment history recall  
+4. Context-aware dialogue generation  
+5. Safety boundaries for stored memory  
+6. Memory backend integration (Pinecone or relational DB)
+
+---
+
+## 🧠 What the Agent Should Remember
+
+### ✔️ User Profile Details
+- Name  
+- Phone  
+- Email  
+- Insurance provider (if voluntarily shared)  
+- Preferred dentist  
+- Preferred appointment times (e.g., “evenings”, “weekends”)  
+- Dental anxiety or sedation preference (only if explicitly provided)  
+- Last checkup date (when relevant)
+
+### ✔️ Long-Term Conversation Context
+- Previous visits  
+- Pending appointments  
+- Cancellations  
+- Frequently requested services  
+- Preference for short vs. detailed replies  
+
+### ✔️ Personalization Cues
+- Likes brief responses  
+- Prefers step-by-step explanations  
+- Emoji preference  
+- Tone preference (formal or friendly)
+
+---
+
+## 🚫 Safety: What the Agent Should *Not* Remember
+
+To maintain user trust and comply with safety standards:
+- Medical history  
+- Dental conditions or diagnoses  
+- Sensitive personal attributes (religion, politics, etc.)  
+- Payment / credit card information  
+- Minors’ data without safeguards  
+
+---
