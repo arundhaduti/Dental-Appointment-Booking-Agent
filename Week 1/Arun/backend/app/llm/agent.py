@@ -20,7 +20,12 @@ from app.persistence import (
     save_stored_appointment,
     save_user,
     get_latest_confirmed_future_appointment,
+    _clean_metadata,
+    get_user_metadata,
+    DUMMY_VECTOR
+
 )
+from app.pinecone_client import index
 from app.google_calendar import (
     is_slot_free,
     create_calendar_event,
@@ -386,6 +391,7 @@ sys_prompt = (
     "If the user wants to BOOK, call dental_booking_agent with collected details. If that tool returns "
     "'unavailable' with alternatives, present those suggested slots and ask the user to pick one; do NOT "
     "ask the user to invent new dates/times.\n"
+    "If the user asks about their preferences, call get_user_preferences using their email."
     "If the user wants to RESCHEDULE, call reschedule_appointment using their email to find the booking.\n"
     "Clinic hours (IST): 9:00-13:00 and 14:00-18:00. Do NOT suggest or book outside these hours or during "
     "lunch (13:00-14:00). If asked for an outside time, explain the hours and offer valid times.\n"
@@ -882,27 +888,60 @@ def check_appointment_slot_available(appointment: Appointment) -> str:
 
 
 @agent.tool
-def update_user_preferences(ctx: RunContext[None], profile: UserProfile) -> dict:
+def update_user_preferences(ctx: RunContext[None], profile: dict) -> dict:
     """
-    Update existing user profile preferences without touching the booking.
-    NEVER triggers slot changes or calendar updates.
+    Update existing user preference fields only.
+    LLM should provide:
+      - contact_email (search key)
+      - ONLY the changed preference fields.
     """
     try:
-        save_user(
-            profile,
-            preferences={
-                "preferred_times": profile.preferred_times,
-                "preferred_dentist": profile.preferred_dentist,
-                "insurance_provider": profile.insurance_provider,
-                "dental_anxiety": profile.dental_anxiety,
-                "prefers_brief_responses": profile.prefers_brief_responses,
-                "prefers_emojis": profile.prefers_emojis,
-                "tone": profile.tone,
-                "last_updated": datetime.now(KOLKATA).isoformat(),
-            },
-        )
+        email = profile.get("contact_email")
+        if not email:
+            return {
+                "status": "error",
+                "message": "Missing contact email to locate user profile."
+            }
 
-        print(">>> User preferences tool called.")
+        # Fetch existing user metadata first
+        existing = get_user_metadata(email)
+        if not existing:
+            return {
+                "status": "not_found",
+                "message": "I couldn't update preferences because I couldn't find your profile."
+            }
+
+        # Merge updated preference fields
+        updated_prefs = {
+            k: v for k, v in profile.items()
+            if k not in ("contact_email", "type", "user_id") and v is not None
+        }
+
+        existing.update(updated_prefs)
+
+        
+        # Remove fields like "None" → treat as null
+        for k in list(existing.keys()):
+            if isinstance(existing[k], str) and existing[k].strip().lower() == "none":
+                del existing[k]
+
+        cleaned = _clean_metadata(existing)
+        print(">>> UPSERT DATA:", cleaned)
+
+        index.upsert(
+        vectors=[
+            {
+                "id": f"user-{email}",
+                "values": DUMMY_VECTOR,
+                "metadata": cleaned,
+            }
+        ],
+        namespace="users",
+    )
+
+
+
+        print(">>> User preferences updated:", updated_prefs)
 
         return {
             "status": "updated",
@@ -910,11 +949,74 @@ def update_user_preferences(ctx: RunContext[None], profile: UserProfile) -> dict
         }
 
     except Exception as e:
+        print(">>> update_user_preferences ERROR:", repr(e))
         return {
             "status": "error",
             "message": f"Preference update failed: {e}"
         }
 
+
+from pydantic import BaseModel, EmailStr
+
+
+class GetPreferencesRequest(BaseModel):
+    contact_email: EmailStr
+
+
+@agent.tool
+def get_user_preferences(ctx: RunContext[None], req: GetPreferencesRequest) -> dict:
+    """
+    Returns stored user preference fields for the email provided.
+    """
+    try:
+        email = req.contact_email
+        metadata = get_user_metadata(email)
+
+        if not metadata:
+            return {
+                "status": "not_found",
+                "message": "I couldn’t find any saved preferences for that email yet."
+            }
+
+        # Extract preference-specific fields only
+        preference_keys = [
+            "preferred_times",
+            "preferred_dentist",
+            "insurance_provider",
+            "dental_anxiety",
+            "prefers_brief_responses",
+            "prefers_emojis",
+            "tone"
+        ]
+
+        prefs = {k: v for k, v in metadata.items() if k in preference_keys and v is not None}
+
+        if not prefs:
+            return {
+                "status": "no_preferences",
+                "message": "You don’t have any specific preferences saved yet."
+            }
+
+        # Build a friendly-tone summary message
+        summary_lines = []
+        for key, value in prefs.items():
+            label = key.replace("_", " ").capitalize()
+            summary_lines.append(f"- {label}: {value}")
+
+        summary = "Here are your saved dental care preferences:\n" + "\n".join(summary_lines)
+
+        return {
+            "status": "found",
+            "preferences": prefs,
+            "message": summary
+        }
+
+    except Exception as e:
+        print(">>> get_user_preferences ERROR:", repr(e))
+        return {
+            "status": "error",
+            "message": f"Could not retrieve preferences: {e}"
+        }
 
 
 

@@ -8,6 +8,24 @@ from typing import List, Optional, Dict
 from .pinecone_client import index
 from .models import UserProfile, StoredAppointment
 
+# Helper to retrieve the current stored metadata for a specific user
+
+def get_user_metadata(user_id: str) -> Optional[Dict]:
+    result = index.query(
+        namespace="users",
+        vector=DUMMY_VECTOR,
+        top_k=1,
+        filter={"user_id": {"$eq": user_id}},
+        include_values=False,
+        include_metadata=True,
+    )
+
+    matches = result.get("matches")
+    if not matches:
+        return None
+
+    return matches[0].metadata
+
 
 # -------------------------------
 # Pinecone metadata safety helper
@@ -39,34 +57,35 @@ DUMMY_VECTOR[0] = 1.0
 # -------------------------------------------------
 
 def save_user(user: UserProfile, preferences: Optional[Dict] = None) -> None:
-    """
-    Store or update user profile + preferences in Pinecone under namespace 'users'.
+    # Get existing metadata
+    existing_md = get_user_metadata(user.user_id) or {}
 
-    Preferences must already be validated and optional.
-    """
-    metadata = {
+    # Base metadata fields to always keep/overwrite
+    existing_md.update({
         "type": "user",
         "user_id": user.user_id,
         "name": user.name,
         "email": user.email,
-        "phone": user.phone,
-    }
+        "phone": user.phone
+    })
 
+    # Merge new preferences (only replace fields explicitly provided)
     if preferences:
-        metadata.update(preferences)
+        for key, value in preferences.items():
+            if value is not None:
+                existing_md[key] = value
 
-    cleaned = _clean_metadata(metadata)
+    cleaned = _clean_metadata(existing_md)
 
     index.upsert(
-        vectors=[
-            (
-                f"user-{user.user_id}",
-                DUMMY_VECTOR,
-                cleaned,
-            )
-        ],
+        vectors=[(
+            f"user-{user.user_id}",
+            DUMMY_VECTOR,
+            cleaned,
+        )],
         namespace="users",
     )
+
 
 
 # -------------------------------------------------
