@@ -1,3 +1,5 @@
+# 2025
+
 15-Oct: Going through Pydantic v2 tutorial on youtube [ https://www.youtube.com/watch?v=7aBRk_JP-qY&t=1257s ]. Halfway through.
 
 16-Oct: Completed Pydantic tutorial [https://www.youtube.com/watch?v=XIdQ6gO3Anc]
@@ -19,3 +21,7 @@ Plugged pydantic schema to Agent. Successfully received the output in schema for
 
 10-December: Added conversation lockout feature in case of sexual content, harassment, abusive language, explicit or inappropriate statements, or violent or hateful speech.
 Week 4 completed. All test cases verified.
+
+# 2026
+
+6-January: Trying to understand how RAG works with a simply toy agent and knowledge base.

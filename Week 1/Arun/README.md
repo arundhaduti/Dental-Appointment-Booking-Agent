@@ -362,3 +362,39 @@ To maintain user trust and comply with safety standards:
 - Minors’ data without safeguards  
 
 ---
+
+## 📚 Retrieval-Augmented Generation (RAG)
+### Clinic Knowledge + External Dental Knowledge
+
+### 🎯 Goal
+
+Enhance the dental appointment agent using a **Retrieval-Augmented Generation (RAG)** system that delivers accurate, contextual, and trustworthy information by combining:
+
+- **Clinic-specific operational knowledge**
+- **General external dental education**
+
+This ensures responses are **grounded, consistent, and safe**, while avoiding hallucinations.
+
+---
+
+## 🏥 1. Clinic-Specific Knowledge RAG
+
+This RAG layer contains **information unique to the clinic** and is used to answer questions related to operations, services, and policies.
+
+### Included Content
+
+- Services offered by the clinic  
+- Pricing and price ranges  
+- Service durations  
+- Clinic hours of operation  
+- Clinic address and parking rules  
+- Dentist and staff information (including languages spoken)  
+- Accepted insurance providers  
+- Cancellation and refund policies  
+- Pre-care and post-care instructions for services provided by the clinic  
+
+### Purpose
+
+- Provide **authoritative, clinic-a**
+
+Use pinecone as a vector database
