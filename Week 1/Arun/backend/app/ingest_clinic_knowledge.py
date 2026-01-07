@@ -1,11 +1,11 @@
 # ingest_clinic_knowledge.py
 
 import os
-from dotenv import load_dotenv
+import requests
 from typing import List, Dict
+from dotenv import load_dotenv
 
-from openai import OpenAI
-from pinecone_client import clinic_index  # separate index object
+from pinecone_client import clinic_index
 
 # -------------------------------------------------
 # Setup
@@ -13,22 +13,40 @@ from pinecone_client import clinic_index  # separate index object
 
 load_dotenv()
 
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
-client = OpenAI(api_key=OPENAI_API_KEY)
+OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
+if not OPENROUTER_API_KEY:
+    raise RuntimeError("OPENROUTER_API_KEY not set")
 
-EMBEDDING_MODEL = "text-embedding-3-small"
+OPENROUTER_EMBEDDING_URL = "https://openrouter.ai/api/v1/embeddings"
+EMBEDDING_MODEL = "openai/text-embedding-3-small"
+
+HEADERS = {
+    "Authorization": f"Bearer {OPENROUTER_API_KEY}",
+    "Content-Type": "application/json",
+}
 
 # -------------------------------------------------
-# Embedding helper
+# Embedding helper (OpenRouter)
 # -------------------------------------------------
 
 def embed(text: str) -> List[float]:
-    response = client.embeddings.create(
-        model=EMBEDDING_MODEL,
-        input=text
+    response = requests.post(
+        OPENROUTER_EMBEDDING_URL,
+        headers=HEADERS,
+        json={
+            "model": EMBEDDING_MODEL,
+            "input": text,
+        },
+        timeout=30,
     )
-    return response.data[0].embedding
 
+    if response.status_code != 200:
+        raise RuntimeError(
+            f"Embedding failed ({response.status_code}): {response.text}"
+        )
+
+    data = response.json()
+    return data["data"][0]["embedding"]
 
 # -------------------------------------------------
 # Clinic knowledge documents
@@ -82,7 +100,6 @@ CLINIC_DOCS: List[Dict] = [
     },
 ]
 
-
 # -------------------------------------------------
 # Ingestion logic
 # -------------------------------------------------
@@ -116,7 +133,6 @@ def ingest_clinic_docs(docs: List[Dict]) -> None:
     )
 
     print(f"✅ Ingested {len(vectors)} clinic knowledge chunks.")
-
 
 # -------------------------------------------------
 # Run

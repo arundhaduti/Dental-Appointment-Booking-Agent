@@ -7,7 +7,9 @@ from typing import List, Optional, Dict, Any
 from app.rate_limit import rate_limiter
 import asyncio
 import uuid
-from app.llm.agent import reset_violation_state
+from app.llm.agent import reset_violation_state, retrieve_rag_context
+
+
 
 
 # Week 1 agent and tools
@@ -60,10 +62,27 @@ def chat(req: ChatRequest):
     try:
         msg_history.append({"role": "user", "content": req.message})
 
+        rag_context = retrieve_rag_context(req.message)
+
+        print("RAG CONTEXT FOUND:", bool(rag_context))
+        print("RAG CONTEXT FOUND:", rag_context)
+
+        if rag_context:
+            context_block = "\n".join(f"- {c}" for c in rag_context)
+            final_input = (
+                "CONTEXT:\n"
+                f"{context_block}\n\n"
+                "USER QUESTION:\n"
+                f"{req.message}"
+            )
+        else:
+            final_input = req.message
+
         result = agent.run_sync(
-            req.message,
+            final_input,
             message_history=msg_history,
         )
+
 
         msg_history = result.all_messages()
 

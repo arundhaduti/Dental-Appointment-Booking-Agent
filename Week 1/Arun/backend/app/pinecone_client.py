@@ -1,31 +1,60 @@
 # backend/app/pinecone_client.py
 
 import os
-from pinecone import Pinecone, ServerlessSpec
 from dotenv import load_dotenv
+from pinecone import Pinecone, ServerlessSpec
 
 load_dotenv()
 
 PINECONE_API_KEY = os.getenv("PINECONE_API_KEY")
-PINECONE_INDEX_NAME = os.getenv("PINECONE_INDEX_NAME", "dental-appointments")
-
 if not PINECONE_API_KEY:
-    raise RuntimeError("ERROR: PINECONE_API_KEY is missing in environment variables.")
+    raise RuntimeError("ERROR: PINECONE_API_KEY is missing.")
 
 pc = Pinecone(api_key=PINECONE_API_KEY)
 
-# Create index if it doesn't exist
-if PINECONE_INDEX_NAME not in pc.list_indexes().names():
+# -------------------------------------------------
+# Index configs
+# -------------------------------------------------
+
+APPOINTMENT_INDEX = "dental-appointments"
+CLINIC_KNOWLEDGE_INDEX = "clinic-knowledge"
+GENERAL_KNOWLEDGE_INDEX = "dental-knowledge"
+
+APPOINTMENT_DIM = 64          # dummy vectors
+EMBEDDING_DIM = 1536          # text-embedding-3-small
+
+SPEC = ServerlessSpec(
+    cloud="aws",
+    region="us-east-1"
+)
+
+# -------------------------------------------------
+# Helper: create index if missing
+# -------------------------------------------------
+
+def ensure_index(name: str, dimension: int):
+    if name in pc.list_indexes().names():
+        return
+
     pc.create_index(
-        name=PINECONE_INDEX_NAME,
-        dimension=64,              # MUST match DUMMY_VECTOR_DIM
+        name=name,
+        dimension=dimension,
         metric="cosine",
-        spec=ServerlessSpec(
-            cloud="aws",
-            region="us-east-1"
-        ),
+        spec=SPEC,
     )
 
-index = pc.Index(PINECONE_INDEX_NAME)
-clinic_index = pc.Index("clinic-knowledge")
-general_index = pc.Index("dental-knowledge")
+# -------------------------------------------------
+# Ensure all indexes exist
+# -------------------------------------------------
+
+ensure_index(APPOINTMENT_INDEX, APPOINTMENT_DIM)
+ensure_index(CLINIC_KNOWLEDGE_INDEX, EMBEDDING_DIM)
+ensure_index(GENERAL_KNOWLEDGE_INDEX, EMBEDDING_DIM)
+
+# -------------------------------------------------
+# Export index handles
+# -------------------------------------------------
+
+index = pc.Index(APPOINTMENT_INDEX)          # appointments + users
+clinic_index = pc.Index(CLINIC_KNOWLEDGE_INDEX)
+general_index = pc.Index(GENERAL_KNOWLEDGE_INDEX)

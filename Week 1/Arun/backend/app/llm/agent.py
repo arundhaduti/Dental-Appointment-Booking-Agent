@@ -13,6 +13,9 @@ from pydantic_ai import Agent, RunContext
 from pydantic_ai.models.openai import OpenAIChatModel
 from pydantic_ai.providers.openai import OpenAIProvider
 from datetime import datetime
+from app.pinecone_client import index, clinic_index, general_index
+import requests
+
 
 
 from app.models import StoredAppointment, UserProfile
@@ -25,7 +28,6 @@ from app.persistence import (
     DUMMY_VECTOR
 
 )
-from app.pinecone_client import index
 from app.google_calendar import (
     is_slot_free,
     create_calendar_event,
@@ -33,6 +35,89 @@ from app.google_calendar import (
     cancel_calendar_event,
     find_alternative_slots,
 )
+
+
+# ---------------------------------------------------------
+# RAG utilities
+# ---------------------------------------------------------
+
+def classify_rag_intent(text: str) -> str:
+    t = text.lower()
+
+    if any(k in t for k in [
+        "price", "cost", "fees", "clinic", "doctor", "insurance",
+        "timing", "hours", "policy", "refund", "parking"
+    ]):
+        return "clinic"
+
+    if any(k in t for k in [
+        "what is", "why", "how often", "is it safe",
+        "plaque", "tartar", "cleaning", "whitening", "x-ray"
+    ]):
+        return "general"
+
+    return "none"
+
+
+
+
+OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
+EMBEDDING_MODEL = "openai/text-embedding-3-small"
+OPENROUTER_EMBED_URL = "https://openrouter.ai/api/v1/embeddings"
+
+def embed_query(text: str) -> list[float]:
+    response = requests.post(
+        OPENROUTER_EMBED_URL,
+        headers={
+            "Authorization": f"Bearer {OPENROUTER_API_KEY}",
+            "Content-Type": "application/json",
+        },
+        json={
+            "model": EMBEDDING_MODEL,
+            "input": text,
+        },
+        timeout=20,
+    )
+    response.raise_for_status()
+    return response.json()["data"][0]["embedding"]
+
+
+def retrieve_rag_context(query: str) -> list[str]:
+    intent = classify_rag_intent(query)
+    embedding = embed_query(query)
+
+    # 1️⃣ Try clinic knowledge first
+    if intent == "clinic":
+        result = clinic_index.query(
+            vector=embedding,
+            top_k=3,
+            namespace="clinic",
+            include_metadata=True,
+        )
+
+        clinic_hits = [
+            m["metadata"]["text"]
+            for m in result.get("matches", [])
+        ]
+
+        if clinic_hits:
+            return clinic_hits
+
+    # 2️⃣ Fallback to general dental knowledge
+    if intent in ("clinic", "general"):
+        result = general_index.query(
+            vector=embedding,
+            top_k=3,
+            namespace="general",
+            include_metadata=True,
+        )
+
+        return [
+            m["metadata"]["text"]
+            for m in result.get("matches", [])
+        ]
+
+    return []
 
 
 #  ------------------------------------------------------
@@ -408,6 +493,22 @@ sys_prompt = (
     "If the tool indicates that the conversation is ended due to repeated violations, you must not respond with anything "
     "else and must repeat only that boundary message until the user returns to appropriate dental-booking questions.\n"
     "If the user enters an invalid date, do not call the 'moderation_guard' tool; instead, politely inform them that the date is invalid and ask them to provide a valid date."
+    "RAG RULES:"
+    "- You may receive CONTEXT snippets from knowledge retrieval."
+    "- Clinic knowledge (prices, services, hours, doctors, insurance, policies, care instructions) is authoritative."
+    "- If clinic knowledge is present, use ONLY that. Never override it with general info."
+    "- General dental knowledge is educational only.\n\n"
+
+    "CONSTRAINTS:"
+    "- Answer ONLY using provided CONTEXT."
+    "- If the answer is not in CONTEXT, say you don’t have that information."
+    "- Never guess prices, durations, or clinic policies."
+    "- Do not diagnose or prescribe; advise seeing a dentist if needed.\n\n"
+
+    "BEHAVIOR:"
+    "- Do not mention retrieval, sources, or context."
+    "- Do not call booking tools for knowledge questions."
+    "- After clinic answers, you may offer to help book an appointment."
 )
 
 agent = Agent(
@@ -1034,7 +1135,20 @@ if __name__ == "__main__":
         if query in exit_conditions:
             break
         else:
+            rag_context = retrieve_rag_context(query)
+
+            if rag_context:
+                context_block = "\n".join(f"- {c}" for c in rag_context)
+
+                query = (
+                    "CONTEXT:\n"
+                    f"{context_block}\n\n"
+                    "USER QUESTION:\n"
+                    f"{query}"
+                )
+
             result = agent.run_sync(query, message_history=msg_history)
+
             msg_history = result.all_messages()
             print(result.output)
 
