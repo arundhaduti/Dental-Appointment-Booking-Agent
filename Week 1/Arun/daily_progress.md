@@ -25,3 +25,5 @@ Week 4 completed. All test cases verified.
 # 2026
 
 6-January: Trying to understand how RAG works with a simply toy agent and knowledge base.
+
+7-January: RAG implementation completed and unit tests done

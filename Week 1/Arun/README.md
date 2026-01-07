@@ -36,23 +36,6 @@ Create a conversational AI agent (chat interface) that:
 	•	Security: store HF token in env vars, encrypt stored contact info if production.
 
 
-** To generate token.json for accessing Google Calendar **
-run this command: 
-cd .\backend\
-uv run .\quickstart.py
-
-
-** To start the backend **
-activate .venv and then cd to backend and run the below command
-uvicorn main:app --reload --port 8000
-
-** To start the frontend **
-activate .venv and then cd to frontend and run the below command
-npm start
-
-Note: You may need to run "npm install" the first time before running "npm start". Also run "npm install react-markdown remark-gfm" before npm start so that the markdown dependencies are installed. All these commands need to be run at "cd frontend"
-
-
 # 🦷 Dental Appointment Booking Assistant  
 ### React • FastAPI • PydanticAI • Google Calendar • Pinecone • Rate Limiting  
 
@@ -398,3 +381,31 @@ This RAG layer contains **information unique to the clinic** and is used to answ
 - Provide **authoritative, clinic-a**
 
 Use pinecone as a vector database
+
+
+# Configuration
+
+** To generate token.json for accessing Google Calendar **
+run this command: 
+cd .\backend\
+uv run .\quickstart.py
+
+
+** To start the backend **
+activate .venv and then cd to backend and run the below command
+uvicorn main:app --reload --port 8000
+
+** To start the frontend **
+activate .venv and then cd to frontend and run the below command
+npm start
+
+Note: You may need to run "npm install" the first time before running "npm start". Also run "npm install react-markdown remark-gfm" before npm start so that the markdown dependencies are installed. All these commands need to be run at "cd frontend"
+
+** To create indexes in pinecone(One time run) **
+Set the correct index name while calling create_index_if_not_exists() function in create_rag_indexes.py
+
+** To ingest embeddings to the indexes in pinecone(One time run) **
+1. Make sure the Clinic knowledge doc is updated in ingest_clinic_knowledge.py
+2. run it as python ingest_clinic_knowledge.py -> Clinic knowledge data is converted to embeddings and upserted to clinic knowledge index in pinecone
+3. Make sure the General dental knowledge doc is updated in ingest_general_dental_knowledge.py
+2. run it as python ingest_general_dental_knowledge.py -> General dental knowledge data is converted to embeddings and upserted to dental knowledge index in pinecone
