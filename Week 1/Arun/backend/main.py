@@ -8,6 +8,11 @@ from app.rate_limit import rate_limiter
 import asyncio
 import uuid
 from app.llm.agent import reset_violation_state, retrieve_rag_context
+import logging
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
 
 
 
@@ -41,31 +46,38 @@ app.add_middleware(
 
 
 class ChatRequest(BaseModel):
-    message: str  # ONLY the current user message
+    message: str
+    session_id: Optional[str] = None
 
 
-# Global chat history for Week 1 agent
-msg_history: List[Any] = []
+
+# Session-based chat history (in-memory)
+session_histories: Dict[str, List[Any]] = {}
 
 
 @app.post("/chat", dependencies=[Depends(rate_limiter)])
 def chat(req: ChatRequest):
-    """
-    Simple, synchronous chat endpoint.
-
-    - Appends user message to msg_history
-    - Calls agent.run_sync() directly (same as test_agent.py)
-    - Updates msg_history
-    - Returns either {"reply": "..."} or {"error": "..."}
-    """
-    global msg_history
     try:
-        msg_history.append({"role": "user", "content": req.message})
+        # 1️⃣ Create or reuse session
+        session_id = req.session_id or str(uuid.uuid4())
 
+        if session_id not in session_histories:
+            session_histories[session_id] = []
+
+        history = session_histories[session_id]
+
+        logger.info(
+        "[CHAT] session_id=%s | user_message=%s",
+        session_id,
+        req.message,
+)
+
+
+        # 2️⃣ Append user message
+        history.append({"role": "user", "content": req.message})
+
+        # 3️⃣ RAG retrieval + context injection
         rag_context = retrieve_rag_context(req.message)
-
-        print("RAG CONTEXT FOUND:", bool(rag_context))
-        print("RAG CONTEXT FOUND:", rag_context)
 
         if rag_context:
             context_block = "\n".join(f"- {c}" for c in rag_context)
@@ -78,17 +90,36 @@ def chat(req: ChatRequest):
         else:
             final_input = req.message
 
+        # 4️⃣ Run agent
         result = agent.run_sync(
             final_input,
-            message_history=msg_history,
+            message_history=history,
+        )
+
+        logger.info(
+        "[CHAT] session_id=%s | assistant_reply=%s",
+        session_id,
+        result.output,
+        )
+
+        # 5️⃣ Store updated history
+        session_histories[session_id] = result.all_messages()
+
+        logger.info(
+        "[CHAT] session_id=%s | history_length=%d",
+        session_id,
+        len(session_histories[session_id]),
         )
 
 
-        msg_history = result.all_messages()
+        return {
+            "reply": result.output,
+            "session_id": session_id,  # frontend must reuse this
+        }
 
-        return {"reply": result.output}
     except Exception as e:
         return {"error": str(e)}
+
 
 
 
@@ -157,18 +188,17 @@ async def get_latest_appointment():
 
 
 @app.post("/reset")
-async def reset_chat():
-    global msg_history, appointmentDetails
-    msg_history = []
-    try:
-        appointmentDetails.clear()
-    except Exception:
-        appointmentDetails = {}
+async def reset_chat(session_id: Optional[str] = None):
+    if session_id and session_id in session_histories:
+        session_histories.pop(session_id, None)
+        reset_violation_state()
+        return {"status": "session_reset"}
 
-    # Reset moderation violations for a fresh conversation
+    # fallback: reset everything (dev only)
+    session_histories.clear()
     reset_violation_state()
+    return {"status": "all_sessions_reset"}
 
-    return {"status": "ok"}
 
 
 

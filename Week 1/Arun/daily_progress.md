@@ -26,4 +26,5 @@ Week 4 completed. All test cases verified.
 
 6-January: Trying to understand how RAG works with a simply toy agent and knowledge base.
 
-7-January: RAG implementation completed and unit tests done
+7-January: RAG implementation completed and unit tests done.
+Session ID added so that multiple users can use the agent at the same time without data leak between the users

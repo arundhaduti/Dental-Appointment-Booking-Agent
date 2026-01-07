@@ -208,6 +208,7 @@ export default function App() {
   const [darkMode, setDarkMode] = useState(false)
   const [locked, setLocked] = useState(false)
   const bottomRef = useRef(null)
+  const [sessionId, setSessionId] = useState(null)
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
@@ -228,10 +229,18 @@ export default function App() {
       const res = await fetch('http://localhost:8000/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message: userText }),
+        body: JSON.stringify({
+        message: userText,
+        session_id: sessionId,
+        }),
+
       })
 
       const data = await res.json()
+      if (data.session_id) {
+        setSessionId(data.session_id)
+      }
+
       let reply = data.reply || data.error || 'No reply.'
 
       // Detect lock marker
@@ -262,6 +271,7 @@ export default function App() {
     setInput('')
     setLoading(false)
     setLocked(false)
+    setSessionId(null)
 
     try {
       await fetch('http://localhost:8000/reset', { method: 'POST' })

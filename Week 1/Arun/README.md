@@ -404,7 +404,8 @@ Note: You may need to run "npm install" the first time before running "npm start
 ** To create indexes in pinecone(One time run) **
 Set the correct index name while calling create_index_if_not_exists() function in create_rag_indexes.py
 
-** To ingest embeddings to the indexes in pinecone(One time run) **
+** To ingest embeddings to the indexes in pinecone(Run only when there is change in the knowledge documents) **
+NOTE: Make sure the IDs are unique.
 1. Make sure the Clinic knowledge doc is updated in ingest_clinic_knowledge.py
 2. run it as python ingest_clinic_knowledge.py -> Clinic knowledge data is converted to embeddings and upserted to clinic knowledge index in pinecone
 3. Make sure the General dental knowledge doc is updated in ingest_general_dental_knowledge.py
