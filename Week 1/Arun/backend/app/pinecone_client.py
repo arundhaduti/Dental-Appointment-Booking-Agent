@@ -27,3 +27,5 @@ if PINECONE_INDEX_NAME not in pc.list_indexes().names():
     )
 
 index = pc.Index(PINECONE_INDEX_NAME)
+clinic_index = pc.Index("clinic-knowledge")
+general_index = pc.Index("dental-knowledge")
