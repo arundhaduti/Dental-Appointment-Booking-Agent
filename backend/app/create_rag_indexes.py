@@ -11,7 +11,7 @@ PINECONE_ENV = os.getenv("PINECONE_ENVIRONMENT")  # e.g. "gcp-starter"
 
 pc = Pinecone(api_key=PINECONE_API_KEY)
 
-# ⚠️ MUST MATCH embedding model dimension
+# MUST MATCH embedding model dimension
 EMBEDDING_DIMENSION = 1536  # for text-embedding-3-small
 
 def create_index_if_not_exists(index_name: str):
@@ -27,7 +27,7 @@ def create_index_if_not_exists(index_name: str):
         metric="cosine",
         spec=ServerlessSpec(
             cloud="aws",
-            region="us-east-1"  # or your Pinecone region
+            region="us-east-1"
         )
     )
 

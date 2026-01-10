@@ -1,136 +1,35 @@
-**TASK - 1 Description**
+# 🦷 Dental Appointment Booking Assistant
 
-Build an interactive text-based agent that helps users book dental appointments using PydanticAI.
-
-Create a conversational AI agent (chat interface) that:
-
-	1.	Asks the user for relevant details to schedule a dental appointment:
-	•	Patient name
-	•	Type of dental service (e.g., cleaning, filling, root canal, etc.)
-	•	Preferred date and time
-	•	Contact details
-	2.	Confirms the booking details back to the user before finalizing.
-	3.	Optionally, handle simple user changes (e.g., “I want to change the time to 4 PM” or “Actually, make it on Friday”).
-	4.	Use PydanticAI to:
-	•	Define structured data models for the appointment.
-	•	Validate inputs and ensure correct types (date/time, contact info, etc.).
-	•	Manage the flow of the conversation.
-
-**Step by Step Approach:**
-
-**Setup:** 
-
-    •  Create Python 3.10+ venv and install pydantic, pydantic-ai, huggingface-hub (and fastapi/uvicorn if web UI later).
-	•   Choose LLM: pick a conversational HF model and get HF_TOKEN (use Hugging Face Inference API / InferenceClient).
-	•	Define schema: write a Pydantic Appointment model (patient_name, service, preferred_date, preferred_time, contact_email/phone, notes).
-	•	Validators: add Pydantic validators (date ≥ today, time format, email/phone regex).
-	•	Agent flow: design simple stateful flow — greeting → collect fields one-by-one → validate each field → confirm.
-	•	Integrate PydanticAI: register the Appointment schema so the agent coerces/validates LLM outputs into typed data.
-	•	Prompting: craft a concise system prompt telling the model to fill the schema, ask 1 clarifying question on invalid/ambiguous inputs.
-	•	Edit handling: detect edit intents (simple LLM intent prompt or rule) and apply a patch to the current Appointment model.
-	•	Confirmation: show a compact summary, ask final confirm (yes/no); on confirm, generate booking id and persist.
-	•	Persistence: save booking as JSON or to SQLite; log minimal info and avoid logging full PII in plaintext.
-	•	Error & rate handling: handle HF rate limits, retry/backoff, and ask precise follow-ups for parse errors.
-	•	Testing: unit tests for validators, convo flow tests (happy path + edit + invalid inputs).
-	•	Optional extras: add FastAPI + WebSocket chat UI, send SMS/email on confirmation (Twilio/SendGrid), or integrate real calendar API.
-	•	Security: store HF token in env vars, encrypt stored contact info if production.
-
-
-# 🦷 Dental Appointment Booking Assistant  
-### React • FastAPI • PydanticAI • Google Calendar • Pinecone • Rate Limiting  
-
-A fully conversational AI-powered dental appointment booking assistant.  
-Users interact naturally through a chat-based UI, and the backend handles intelligent reasoning, real-time availability checks, Google Calendar scheduling, persistence, and rate limiting.
+A full-stack, production-grade AI agent that books real dental appointments using natural language.
 
 ---
 
-# 📘 Overview
-
-This project provides an end‑to‑end system for managing dental appointments through natural language:
-
-- A modern **React chat interface**
-- A **FastAPI backend** powered by **PydanticAI**
-- Automatic **Google Calendar scheduling**
-- **Pinecone** as a persistence layer for appointments
-- **Rate limiting** for API protection
-
-The user interacts only with the AI assistant — no forms, no buttons.
+## Overview
+This project implements a conversational dental appointment booking system powered by **PydanticAI**, **FastAPI**, **Google Calendar**, and **Pinecone**. Users talk to the assistant through a React UI, and the agent handles validation, scheduling, memory, and retrieval.
 
 ---
 
-# 🚀 Features
-
-## 🧠 Conversational AI Booking
-The assistant:
-- Asks one question at a time  
-- Validates date, time, phone, and email  
-- Detects missing or invalid fields  
-- Prevents ambiguous instructions  
-- Confirms before scheduling  
-
-Once all details are gathered, the assistant calls backend tools automatically.
+## Core Features
+- Natural language appointment booking
+- Date, time, phone and email validation
+- Google Calendar availability + booking
+- Pinecone-based appointment storage
+- Long-term user memory & personalization
+- Retrieval-Augmented Generation (Clinic + Dental knowledge)
+- Rate limiting and security
 
 ---
 
-## 📅 Google Calendar Integration
-The backend:
-- Checks dentist availability  
-- Prevents overlapping bookings  
-- Creates real Google Calendar events  
-- Stores the `google_event_id` for future management  
-
-Uses OAuth2 with:
-- `credentials.json` (OAuth client secrets)  
-- `token.json` (auto-generated at first authorization)
+## Architecture
+User → React UI → FastAPI → PydanticAI → Google Calendar & Pinecone
 
 ---
 
-## 🗄 Pinecone Persistence
-Stores:
-- User profiles  
-- Appointment records  
-- Metadata (event IDs, start/end time, reason, etc.)
-
-Appointments can be queried with:
-```
-GET /appointments?user_id=<email>
-```
-
----
-
-## 🔒 Rate Limiting
-To protect the backend, each IP can make:
-- **10 requests per minute**
-
-A limit breach returns:
-```
-HTTP 429 Too Many Requests
-```
-
-This applies to all main API endpoints.
-
----
-
-# 🏗 Architecture
-
-```
-User → React Chat UI → FastAPI → PydanticAI Agent → Tools:
-    • Google Calendar (availability + event creation)
-    • Pinecone (save/read appointments)
-```
-
-The LLM orchestrates the entire workflow.
-
----
-
-# 🗂 Project Structure
-
-```
+## Project Structure
 backend/
   main.py
   app/
-    llm/
-      agent.py
+    llm/agent.py
     google_calendar.py
     persistence.py
     models.py
@@ -139,274 +38,94 @@ backend/
 
 frontend/
   src/App.jsx
-```
 
 ---
 
-# ⚙ Backend Setup (Using uv)
+## Environment Variables
+Create backend/.env
 
-## 1. Install dependencies
-From `backend/`:
-
-```
-uv sync
-```
-
-To add new dependencies:
-
-```
-uv add fastapi uvicorn pydantic-ai python-dotenv google-auth google-auth-oauthlib google-api-python-client pinecone-client python-dateutil
-```
-
----
-
-# 🔧 Environment Variables
-
-Create `backend/.env`:
-
-```
-OPENROUTER_API_KEY=sk-xxxx
-PINECONE_API_KEY=xxxx
+OPENROUTER_API_KEY=
+PINECONE_API_KEY=
 PINECONE_INDEX_NAME=dental-appointments
 GOOGLE_CALENDAR_ID=primary
-```
 
 ---
 
-# 🔐 Google Calendar Setup
-
-1. Go to **Google Cloud Console → APIs & Services → Credentials**
-2. Create an **OAuth Client ID**
-3. Download **credentials.json**
-4. Place it inside `backend/`
-5. When the backend first needs calendar access, your browser will open for OAuth
-6. A **token.json** file will be generated automatically
-
-Requires enabling:
-- Google Calendar API
+## Google Calendar Setup
+1. Create OAuth client
+2. Download credentials.json
+3. Place inside backend/
+4. Run quickstart.py to generate token.json
 
 ---
 
-# 📦 Pinecone Setup
-
-1. Create a serverless index:
-   - Name: `dental-appointments`
-   - Dimension: 64
-   - Metric: cosine  
-2. Confirm `PINECONE_API_KEY` is valid  
-
-Backend loads the index in `pinecone_client.py`.
+## Pinecone Setup
+Create index:
+- Name: dental-appointments
+- Dimension: 64
+- Metric: cosine
 
 ---
 
-# 🚀 Running the Backend
-
-```
-uv run uvicorn main:app --reload
-```
-
-Open API docs:
-
-```
-http://localhost:8000/docs
-```
+## Running Backend
+cd backend
+uv run uvicorn main:app --reload --port 8000
 
 ---
 
-# 💻 Frontend Setup
-
-```
+## Running Frontend
 cd frontend
 npm install
-npm start
-```
-
-Open:
-```
-http://localhost:3000
-```
-
----
-
-# 🧪 Testing Guide
-
-## ✔ Full Booking Flow
-1. Open UI  
-2. Type:  
-   ```
-   I want to book an appointment
-   ```  
-3. Provide all details as the assistant asks  
-4. A Google Calendar event is created  
-5. Appointment appears in Pinecone:
-   ```
-   GET /appointments?user_id=<email>
-   ```
-
----
-
-## ✔ Slot Conflict Handling
-Try to book the same slot again.  
-Expected response:
-```
-That time slot is already booked.
-```
-
----
-
-## ✔ Rate Limiting
-Send >10 requests within 60 seconds.  
-Response:
-```
-HTTP 429 Too Many Requests
-```
-
----
-
-# 🧰 API Summary
-
-### POST /chat
-```
-{ "message": "Hello" }
-```
-
-### POST /appointments  
-### GET /appointments?user_id=<email>  
-### POST /book  
-### POST /check_slot  
-### POST /reset  
-
----
-
-# 🧯 Troubleshooting
-
-### Google OAuth “App Not Verified”
-Add your email to OAuth test users  
-or publish the OAuth app publicly.
-
-### Pinecone vector errors
-Ensure vectors are non‑zero and match index dimensions.
-
-### Chat endpoint hangs
-Use synchronous `agent.run_sync()` instead of thread wrappers.
-
----
-
-
-# 🗂️ User Information Storage & Personalization
-
-## 🎯 Objective
-Enable the Dental Appointment Agent to maintain memory of user-specific details so the conversation becomes more natural, consistent, and personalized across sessions.
-
-## 🔧 Features Added This Week
-1. Persistent user profile storage  
-2. Preference-based personalization  
-3. Appointment history recall  
-4. Context-aware dialogue generation  
-5. Safety boundaries for stored memory  
-6. Memory backend integration (Pinecone or relational DB)
-
----
-
-## 🧠 What the Agent Should Remember
-
-### ✔️ User Profile Details
-- Name  
-- Phone  
-- Email  
-- Insurance provider (if voluntarily shared)  
-- Preferred dentist  
-- Preferred appointment times (e.g., “evenings”, “weekends”)  
-- Dental anxiety or sedation preference (only if explicitly provided)  
-- Last checkup date (when relevant)
-
-### ✔️ Long-Term Conversation Context
-- Previous visits  
-- Pending appointments  
-- Cancellations  
-- Frequently requested services  
-- Preference for short vs. detailed replies  
-
-### ✔️ Personalization Cues
-- Likes brief responses  
-- Prefers step-by-step explanations  
-- Emoji preference  
-- Tone preference (formal or friendly)
-
----
-
-## 🚫 Safety: What the Agent Should *Not* Remember
-
-To maintain user trust and comply with safety standards:
-- Medical history  
-- Dental conditions or diagnoses  
-- Sensitive personal attributes (religion, politics, etc.)  
-- Payment / credit card information  
-- Minors’ data without safeguards  
-
----
-
-## 📚 Retrieval-Augmented Generation (RAG)
-### Clinic Knowledge + External Dental Knowledge
-
-### 🎯 Goal
-
-Enhance the dental appointment agent using a **Retrieval-Augmented Generation (RAG)** system that delivers accurate, contextual, and trustworthy information by combining:
-
-- **Clinic-specific operational knowledge**
-- **General external dental education**
-
-This ensures responses are **grounded, consistent, and safe**, while avoiding hallucinations.
-
----
-
-## 🏥 1. Clinic-Specific Knowledge RAG
-
-This RAG layer contains **information unique to the clinic** and is used to answer questions related to operations, services, and policies.
-
-### Included Content
-
-- Services offered by the clinic  
-- Pricing and price ranges  
-- Service durations  
-- Clinic hours of operation  
-- Clinic address and parking rules  
-- Dentist and staff information (including languages spoken)  
-- Accepted insurance providers  
-- Cancellation and refund policies  
-- Pre-care and post-care instructions for services provided by the clinic  
-
-### Purpose
-
-- Provide **authoritative, clinic-a**
-
-Use pinecone as a vector database
-
-
-# Configuration
-
-** To generate token.json for accessing Google Calendar **
-run this command: 
-cd .\backend\
-uv run .\quickstart.py
-
-
-** To start the backend **
-activate .venv and then cd to backend and run the below command
-uvicorn main:app --reload --port 8000
-
-** To start the frontend **
-activate .venv and then cd to frontend and run the below command
+npm install react-markdown remark-gfm
 npm start
 
-Note: You may need to run "npm install" the first time before running "npm start". Also run "npm install react-markdown remark-gfm" before npm start so that the markdown dependencies are installed. All these commands need to be run at "cd frontend"
+---
 
-** To create indexes in pinecone(One time run) **
-Set the correct index name while calling create_index_if_not_exists() function in create_rag_indexes.py
+## RAG
+Two Pinecone indexes:
+- Clinic Knowledge
+- General Dental Knowledge
+Run create_rag_indexes.py to create these 2 in pinecone
 
-** To ingest embeddings to the indexes in pinecone(Run only when there is change in the knowledge documents) **
-NOTE: Make sure the IDs are unique.
-1. Make sure the Clinic knowledge doc is updated in ingest_clinic_knowledge.py
-2. run it as python ingest_clinic_knowledge.py -> Clinic knowledge data is converted to embeddings and upserted to clinic knowledge index in pinecone
-3. Make sure the General dental knowledge doc is updated in ingest_general_dental_knowledge.py
-2. run it as python ingest_general_dental_knowledge.py -> General dental knowledge data is converted to embeddings and upserted to dental knowledge index in pinecone
+Run ingestion scripts when documents change.
+
+---
+
+## User Memory
+Stored:
+- Name
+- Email
+- Phone
+- Preferences
+- Appointment history
+
+Not stored:
+- Medical diagnosis
+- Payment data
+- Sensitive attributes
+
+---
+
+## API
+POST /chat
+POST /book
+POST /check_slot
+GET /appointments?user_id=email
+
+---
+
+## Rate Limiting
+10 requests per minute per IP
+
+---
+
+## Testing
+Try:
+“I want to book a dental appointment”
+Provide details and confirm
+
+---
+
+## Troubleshooting
+Google OAuth errors → add test user
+Pinecone errors → verify dimension and API key

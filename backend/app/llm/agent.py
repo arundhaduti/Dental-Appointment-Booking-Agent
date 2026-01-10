@@ -86,7 +86,7 @@ def retrieve_rag_context(query: str) -> list[str]:
     intent = classify_rag_intent(query)
     embedding = embed_query(query)
 
-    # 1️⃣ Try clinic knowledge first
+    # 1️ Try clinic knowledge first
     if intent == "clinic":
         result = clinic_index.query(
             vector=embedding,
@@ -103,7 +103,7 @@ def retrieve_rag_context(query: str) -> list[str]:
         if clinic_hits:
             return clinic_hits
 
-    # 2️⃣ Fallback to general dental knowledge
+    # 2️ Fallback to general dental knowledge
     if intent in ("clinic", "general"):
         result = general_index.query(
             vector=embedding,
